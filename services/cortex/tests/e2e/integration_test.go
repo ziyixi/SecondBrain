@@ -884,8 +884,10 @@ func TestIntegrationFeedbackLoop(t *testing.T) {
 			t.Error("expected some negative feedback recorded")
 		}
 
-		// Satisfaction = positive / (positive + negative + correction)
-		expectedRate := float64(posCount) / float64(posCount+negCount)
+		// Satisfaction = positive / (positive + negative + correction).
+		// In this test we only send positive and negative, so correction = 0.
+		corrCount := m.FeedbackCounts[metrics.FeedbackCorrection]
+		expectedRate := float64(posCount) / float64(posCount+negCount+corrCount)
 		if math.Abs(m.UserSatisfactionRate-expectedRate) > 0.01 {
 			t.Errorf("satisfaction rate mismatch: expected ~%.3f, got %.3f",
 				expectedRate, m.UserSatisfactionRate)
