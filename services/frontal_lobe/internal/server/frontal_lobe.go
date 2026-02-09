@@ -67,78 +67,46 @@ func (s *FrontalLobeServer) StreamThoughtProcess(stream agentv1.ReasoningEngine_
 		sessionID := input.GetSessionId()
 		s.logger.Info("processing thought", "session_id", sessionID)
 
-		// Send thinking status
-		if err := stream.Send(&agentv1.AgentOutput{
-			SessionId: sessionID,
-			Timestamp: timestamppb.Now(),
-			OutputType: &agentv1.AgentOutput_Status{
-				Status: &agentv1.StatusUpdate{
-					StatusMessage: "Thinking...",
-					Progress:      0.3,
-				},
-			},
-		}); err != nil {
+		if err := sendStatus(stream, sessionID, "Thinking...", 0.3); err != nil {
 			return err
 		}
 
-		// Process based on input type
 		if query := input.GetUserQuery(); query != "" {
-			// Send thought chain
-			if err := stream.Send(&agentv1.AgentOutput{
-				SessionId: sessionID,
-				Timestamp: timestamppb.Now(),
-				OutputType: &agentv1.AgentOutput_ThoughtChain{
-					ThoughtChain: "Analyzing the query and retrieving relevant context...",
-				},
-			}); err != nil {
-				return err
-			}
-
-			// Build prompt from context
-			prompt := s.buildPrompt(query, input.GetContext())
-
-			// Generate response
-			response, err := s.llm.Generate(stream.Context(), prompt)
-			if err != nil {
-				return stream.Send(&agentv1.AgentOutput{
-					SessionId: sessionID,
-					Timestamp: timestamppb.Now(),
-					OutputType: &agentv1.AgentOutput_FinalResponse{
-						FinalResponse: "I encountered an error while processing your request.",
-					},
-				})
-			}
-
-			// Send final response
-			if err := stream.Send(&agentv1.AgentOutput{
-				SessionId: sessionID,
-				Timestamp: timestamppb.Now(),
-				OutputType: &agentv1.AgentOutput_FinalResponse{
-					FinalResponse: response,
-				},
-			}); err != nil {
+			if err := s.handleQuery(stream, sessionID, query, input.GetContext()); err != nil {
 				return err
 			}
 		}
 
-		// Handle tool results
 		if toolResult := input.GetToolResult(); toolResult != nil {
 			s.logger.Info("received tool result",
 				"call_id", toolResult.GetCallId(),
 				"is_error", toolResult.GetIsError(),
 			)
-
-			if err := stream.Send(&agentv1.AgentOutput{
-				SessionId: sessionID,
-				Timestamp: timestamppb.Now(),
-				OutputType: &agentv1.AgentOutput_ThoughtChain{
-					ThoughtChain: "Processing tool result...",
-				},
-			}); err != nil {
+			if err := sendThought(stream, sessionID, "Processing tool result..."); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+// handleQuery generates an LLM response for a user query and sends it on the stream.
+func (s *FrontalLobeServer) handleQuery(
+	stream agentv1.ReasoningEngine_StreamThoughtProcessServer,
+	sessionID, query string,
+	ctx *agentv1.ContextSnapshot,
+) error {
+	if err := sendThought(stream, sessionID, "Analyzing the query and retrieving relevant context..."); err != nil {
+		return err
+	}
+
+	prompt := s.buildPrompt(query, ctx)
+
+	response, err := s.llm.Generate(stream.Context(), prompt)
+	if err != nil {
+		return sendFinalResponse(stream, sessionID, "I encountered an error while processing your request.")
+	}
+
+	return sendFinalResponse(stream, sessionID, response)
 }
 
 // ClassifyItem classifies an inbox item.
@@ -232,4 +200,42 @@ func (s *FrontalLobeServer) buildPrompt(query string, ctx *agentv1.ContextSnapsh
 	prompt += "User query: " + query
 
 	return prompt
+}
+
+// --- Stream output helpers ---
+
+// sendStatus sends a progress status update to the client stream.
+func sendStatus(stream agentv1.ReasoningEngine_StreamThoughtProcessServer, sessionID, message string, progress float32) error {
+	return stream.Send(&agentv1.AgentOutput{
+		SessionId: sessionID,
+		Timestamp: timestamppb.Now(),
+		OutputType: &agentv1.AgentOutput_Status{
+			Status: &agentv1.StatusUpdate{
+				StatusMessage: message,
+				Progress:      progress,
+			},
+		},
+	})
+}
+
+// sendThought sends an intermediate thought chain message to the client stream.
+func sendThought(stream agentv1.ReasoningEngine_StreamThoughtProcessServer, sessionID, thought string) error {
+	return stream.Send(&agentv1.AgentOutput{
+		SessionId: sessionID,
+		Timestamp: timestamppb.Now(),
+		OutputType: &agentv1.AgentOutput_ThoughtChain{
+			ThoughtChain: thought,
+		},
+	})
+}
+
+// sendFinalResponse sends a final response to the client stream.
+func sendFinalResponse(stream agentv1.ReasoningEngine_StreamThoughtProcessServer, sessionID, response string) error {
+	return stream.Send(&agentv1.AgentOutput{
+		SessionId: sessionID,
+		Timestamp: timestamppb.Now(),
+		OutputType: &agentv1.AgentOutput_FinalResponse{
+			FinalResponse: response,
+		},
+	})
 }

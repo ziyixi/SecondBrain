@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,15 +30,41 @@ func main() {
 
 	cfg := config.Load()
 
-	// Create LLM provider
-	var llm reasoning.LLMProvider
+	// Create LLM provider router
+	var defaultLLM reasoning.LLMProvider
 	switch cfg.LLMProvider {
+	case "openai":
+		defaultLLM = reasoning.NewOpenAIProvider(cfg.LLMAPIKey, cfg.LLMBaseURL, cfg.LLMModel, cfg.ReasoningTimeout)
+	case "google":
+		defaultLLM = reasoning.NewGoogleProvider(cfg.LLMAPIKey, cfg.LLMModel, cfg.ReasoningTimeout)
 	default:
-		llm = reasoning.NewMockLLM()
+		defaultLLM = reasoning.NewMockLLM()
 	}
 
-	// Create server
-	frontalServer := server.NewFrontalLobeServer(logger, cfg, llm)
+	router := reasoning.NewRouter(defaultLLM)
+
+	// Register additional OpenAI models
+	if cfg.OpenAIAPIKey != "" && cfg.OpenAIModels != "" {
+		for _, model := range strings.Split(cfg.OpenAIModels, ",") {
+			model = strings.TrimSpace(model)
+			if model != "" {
+				router.Register(model, reasoning.NewOpenAIProvider(cfg.OpenAIAPIKey, cfg.OpenAIBaseURL, model, cfg.ReasoningTimeout))
+			}
+		}
+	}
+
+	// Register additional Google models
+	if cfg.GoogleAPIKey != "" && cfg.GoogleModels != "" {
+		for _, model := range strings.Split(cfg.GoogleModels, ",") {
+			model = strings.TrimSpace(model)
+			if model != "" {
+				router.Register(model, reasoning.NewGoogleProvider(cfg.GoogleAPIKey, model, cfg.ReasoningTimeout))
+			}
+		}
+	}
+
+	// Create server (router implements LLMProvider)
+	frontalServer := server.NewFrontalLobeServer(logger, cfg, router)
 
 	// Configure gRPC server
 	grpcServer := grpc.NewServer(

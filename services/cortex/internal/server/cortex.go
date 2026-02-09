@@ -11,6 +11,7 @@ import (
 	commonv1 "github.com/ziyixi/SecondBrain/services/cortex/pkg/gen/common/v1"
 	ingestionv1 "github.com/ziyixi/SecondBrain/services/cortex/pkg/gen/ingestion/v1"
 	memoryv1 "github.com/ziyixi/SecondBrain/services/cortex/pkg/gen/memory/v1"
+	"github.com/ziyixi/SecondBrain/services/cortex/internal/metrics"
 	"github.com/ziyixi/SecondBrain/services/cortex/internal/session"
 
 	"google.golang.org/grpc"
@@ -27,6 +28,7 @@ type CortexServer struct {
 
 	logger         *slog.Logger
 	sessionMgr     *session.Manager
+	metricsStore   *metrics.Store
 	frontalConn    *grpc.ClientConn
 	hippocampusConn *grpc.ClientConn
 	frontalClient  agentv1.ReasoningEngineClient
@@ -37,10 +39,16 @@ type CortexServer struct {
 // NewCortexServer creates a new CortexServer instance.
 func NewCortexServer(logger *slog.Logger) *CortexServer {
 	return &CortexServer{
-		logger:     logger,
-		sessionMgr: session.NewManager(),
-		version:    "0.1.0",
+		logger:       logger,
+		sessionMgr:   session.NewManager(),
+		metricsStore: metrics.NewStore(),
+		version:      "0.1.0",
 	}
+}
+
+// MetricsStore returns the metrics store for external access (e.g., HTTP API).
+func (s *CortexServer) MetricsStore() *metrics.Store {
+	return s.metricsStore
 }
 
 // ConnectDownstream establishes connections to downstream services.
@@ -137,72 +145,137 @@ func (s *CortexServer) processAgentInput(
 ) error {
 	sessionID := input.GetSessionId()
 
-	// Send status update
-	if err := stream.Send(&agentv1.AgentOutput{
+	if err := sendStatus(stream, sessionID, "Processing input...", 0.1); err != nil {
+		return fmt.Errorf("sending status: %w", err)
+	}
+
+	if query := input.GetUserQuery(); query != "" {
+		return s.handleUserQuery(stream, sess, input, sessionID, query)
+	}
+
+	if feedback := input.GetUserFeedback(); feedback != nil {
+		s.handleFeedback(sessionID, feedback)
+	}
+
+	return nil
+}
+
+// handleUserQuery enriches the query with context from Hippocampus, records
+// metrics, and forwards to the Frontal Lobe for reasoning.
+func (s *CortexServer) handleUserQuery(
+	stream agentv1.ReasoningEngine_StreamThoughtProcessServer,
+	sess *session.Session,
+	input *agentv1.AgentInput,
+	sessionID, query string,
+) error {
+	sess.AddEpisodicMemory("User: " + query)
+
+	ctx := input.GetContext()
+	if ctx == nil {
+		ctx = &agentv1.ContextSnapshot{}
+	}
+
+	contextRelevance := s.enrichContextFromMemory(stream.Context(), ctx, query)
+	ctx.EpisodicMemory = sess.GetEpisodicMemory()
+	input.Context = ctx
+
+	s.metricsStore.Record(metrics.InteractionRecord{
+		SessionID:        sessionID,
+		Timestamp:        time.Now(),
+		Query:            query,
+		ContextRelevance: contextRelevance,
+		ResponseQuality:  contextRelevance, // initial estimate from context quality
+	})
+
+	if s.frontalClient != nil {
+		return s.forwardToFrontalLobe(stream, input)
+	}
+
+	return sendFinalResponse(stream, sessionID,
+		fmt.Sprintf("Received query: %s (Frontal Lobe not connected)", query))
+}
+
+// enrichContextFromMemory searches Hippocampus for semantically relevant
+// chunks and appends them to the context snapshot. Returns the average
+// relevance score across results (0 if no results or no memory client).
+func (s *CortexServer) enrichContextFromMemory(
+	reqCtx context.Context,
+	snapshot *agentv1.ContextSnapshot,
+	query string,
+) float64 {
+	if s.memoryClient == nil {
+		return 0
+	}
+
+	searchResp, err := s.memoryClient.SemanticSearch(reqCtx, &memoryv1.SearchRequest{
+		Query: query,
+		TopK:  5,
+	})
+	if err != nil {
+		s.logger.Warn("failed to search memory", "error", err)
+		return 0
+	}
+
+	var totalScore float64
+	for _, result := range searchResp.GetResults() {
+		snapshot.SemanticMemory = append(snapshot.SemanticMemory, &agentv1.SemanticChunk{
+			ChunkId:        result.GetChunkId(),
+			Content:        result.GetContent(),
+			RelevanceScore: result.GetScore(),
+			Metadata:       result.GetMetadata(),
+		})
+		totalScore += float64(result.GetScore())
+	}
+
+	if n := len(searchResp.GetResults()); n > 0 {
+		return totalScore / float64(n)
+	}
+	return 0
+}
+
+// handleFeedback records a user feedback signal in the metrics store.
+func (s *CortexServer) handleFeedback(sessionID string, feedback *agentv1.FeedbackSignal) {
+	var feedbackType metrics.FeedbackType
+	switch feedback.GetSentiment() {
+	case agentv1.FeedbackSignal_POSITIVE:
+		feedbackType = metrics.FeedbackPositive
+	case agentv1.FeedbackSignal_NEGATIVE:
+		feedbackType = metrics.FeedbackNegative
+	case agentv1.FeedbackSignal_CORRECTION:
+		feedbackType = metrics.FeedbackCorrection
+	}
+	s.metricsStore.Record(metrics.InteractionRecord{
+		SessionID: sessionID,
+		Timestamp: time.Now(),
+		Feedback:  feedbackType,
+	})
+}
+
+// --- Stream output helpers ---
+
+// sendStatus sends a progress status update to the client stream.
+func sendStatus(stream agentv1.ReasoningEngine_StreamThoughtProcessServer, sessionID, message string, progress float32) error {
+	return stream.Send(&agentv1.AgentOutput{
 		SessionId: sessionID,
 		Timestamp: timestamppb.Now(),
 		OutputType: &agentv1.AgentOutput_Status{
 			Status: &agentv1.StatusUpdate{
-				StatusMessage: "Processing input...",
-				Progress:      0.1,
+				StatusMessage: message,
+				Progress:      progress,
 			},
 		},
-	}); err != nil {
-		return fmt.Errorf("sending status: %w", err)
-	}
+	})
+}
 
-	// If there's a user query, enrich with context from Hippocampus
-	if query := input.GetUserQuery(); query != "" {
-		sess.AddEpisodicMemory("User: " + query)
-
-		// Search for relevant context in the vector store
-		context := input.GetContext()
-		if context == nil {
-			context = &agentv1.ContextSnapshot{}
-		}
-
-		if s.memoryClient != nil {
-			searchResp, err := s.memoryClient.SemanticSearch(
-				stream.Context(),
-				&memoryv1.SearchRequest{
-					Query: query,
-					TopK:  5,
-				},
-			)
-			if err != nil {
-				s.logger.Warn("failed to search memory", "error", err)
-			} else {
-				for _, result := range searchResp.GetResults() {
-					context.SemanticMemory = append(context.SemanticMemory, &agentv1.SemanticChunk{
-						ChunkId:        result.GetChunkId(),
-						Content:        result.GetContent(),
-						RelevanceScore: result.GetScore(),
-						Metadata:       result.GetMetadata(),
-					})
-				}
-			}
-		}
-
-		// Add episodic memory
-		context.EpisodicMemory = sess.GetEpisodicMemory()
-		input.Context = context
-
-		// Forward to Frontal Lobe if connected
-		if s.frontalClient != nil {
-			return s.forwardToFrontalLobe(stream, input)
-		}
-
-		// Fallback: echo response if frontal lobe is not connected
-		return stream.Send(&agentv1.AgentOutput{
-			SessionId: sessionID,
-			Timestamp: timestamppb.Now(),
-			OutputType: &agentv1.AgentOutput_FinalResponse{
-				FinalResponse: fmt.Sprintf("Received query: %s (Frontal Lobe not connected)", query),
-			},
-		})
-	}
-
-	return nil
+// sendFinalResponse sends a final response to the client stream.
+func sendFinalResponse(stream agentv1.ReasoningEngine_StreamThoughtProcessServer, sessionID, response string) error {
+	return stream.Send(&agentv1.AgentOutput{
+		SessionId: sessionID,
+		Timestamp: timestamppb.Now(),
+		OutputType: &agentv1.AgentOutput_FinalResponse{
+			FinalResponse: response,
+		},
+	})
 }
 
 func (s *CortexServer) forwardToFrontalLobe(

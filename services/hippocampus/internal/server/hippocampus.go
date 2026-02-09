@@ -73,58 +73,74 @@ func (s *HippocampusServer) IndexDocument(ctx context.Context, req *memoryv1.Ind
 
 	content := req.GetContent()
 	if content == "" {
-		return &memoryv1.IndexResponse{
-			DocumentId:    docID,
-			ChunksCreated: 0,
-			Success:       false,
-			ErrorMessage:  "content is empty",
-		}, nil
+		return indexError(docID, "content is empty"), nil
 	}
 
-	// Determine chunking strategy
+	// Chunk the document
+	chunks := s.chunkDocument(docID, content, req.GetChunkingStrategy(), req.GetMetadata())
+	if len(chunks) == 0 {
+		return indexError(docID, "no chunks generated"), nil
+	}
+
+	// Generate embeddings
+	embeddings, err := s.embedChunks(chunks)
+	if err != nil {
+		return indexError(docID, fmt.Sprintf("embedding error: %v", err)), nil
+	}
+
+	// Store vectors
+	chunkIDs, err := s.storeChunkVectors(docID, chunks, embeddings)
+	if err != nil {
+		return indexError(docID, fmt.Sprintf("vector store error: %v", err)), nil
+	}
+
+	s.mu.Lock()
+	s.docChunks[docID] = chunkIDs
+	s.lastIndexed = time.Now()
+	s.mu.Unlock()
+
+	s.logger.Info("indexed document", "document_id", docID, "chunks", len(chunks))
+
+	return &memoryv1.IndexResponse{
+		DocumentId:    docID,
+		ChunksCreated: int32(len(chunks)),
+		Success:       true,
+	}, nil
+}
+
+// chunkDocument splits document content using the requested chunking strategy.
+func (s *HippocampusServer) chunkDocument(docID, content string, strategy memoryv1.ChunkingStrategy, reqMetadata map[string]string) []chunker.Chunk {
 	strategyMap := map[memoryv1.ChunkingStrategy]string{
 		memoryv1.ChunkingStrategy_CHUNKING_STRATEGY_UNSPECIFIED:  "fixed",
 		memoryv1.ChunkingStrategy_CHUNKING_STRATEGY_FIXED:        "fixed",
 		memoryv1.ChunkingStrategy_CHUNKING_STRATEGY_SEMANTIC:     "semantic",
 		memoryv1.ChunkingStrategy_CHUNKING_STRATEGY_HIERARCHICAL: "hierarchical",
 	}
-	strategyName := strategyMap[req.GetChunkingStrategy()]
-	strat := chunker.NewStrategy(strategyName, s.cfg.ChunkSize, s.cfg.ChunkOverlap)
+	strat := chunker.NewStrategy(strategyMap[strategy], s.cfg.ChunkSize, s.cfg.ChunkOverlap)
 
 	metadata := make(map[string]string)
-	for k, v := range req.GetMetadata() {
+	for k, v := range reqMetadata {
 		metadata[k] = v
 	}
 	metadata["document_id"] = docID
 
-	chunks := strat.Chunk(docID, content, metadata)
-	if len(chunks) == 0 {
-		return &memoryv1.IndexResponse{
-			DocumentId:    docID,
-			ChunksCreated: 0,
-			Success:       false,
-			ErrorMessage:  "no chunks generated",
-		}, nil
-	}
+	return strat.Chunk(docID, content, metadata)
+}
 
-	// Generate embeddings
+// embedChunks generates embeddings for a list of chunks.
+func (s *HippocampusServer) embedChunks(chunks []chunker.Chunk) ([][]float32, error) {
 	texts := make([]string, len(chunks))
 	for i, c := range chunks {
 		texts[i] = c.Content
 	}
+	return s.embedder.Embed(texts)
+}
 
-	embeddings, err := s.embedder.Embed(texts)
-	if err != nil {
-		return &memoryv1.IndexResponse{
-			DocumentId:   docID,
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("embedding error: %v", err),
-		}, nil
-	}
-
-	// Store vectors
+// storeChunkVectors writes chunk embeddings into the vector store and returns chunk IDs.
+func (s *HippocampusServer) storeChunkVectors(docID string, chunks []chunker.Chunk, embeddings [][]float32) ([]string, error) {
 	records := make([]vectorstore.Record, len(chunks))
 	chunkIDs := make([]string, len(chunks))
+
 	for i, c := range chunks {
 		payload := make(map[string]string)
 		for k, v := range c.Metadata {
@@ -142,25 +158,18 @@ func (s *HippocampusServer) IndexDocument(ctx context.Context, req *memoryv1.Ind
 	}
 
 	if err := s.store.Upsert(s.cfg.CollectionName, records); err != nil {
-		return &memoryv1.IndexResponse{
-			DocumentId:   docID,
-			Success:      false,
-			ErrorMessage: fmt.Sprintf("vector store error: %v", err),
-		}, nil
+		return nil, err
 	}
+	return chunkIDs, nil
+}
 
-	s.mu.Lock()
-	s.docChunks[docID] = chunkIDs
-	s.lastIndexed = time.Now()
-	s.mu.Unlock()
-
-	s.logger.Info("indexed document", "document_id", docID, "chunks", len(chunks))
-
+// indexError builds a failed IndexResponse with the given error message.
+func indexError(docID, message string) *memoryv1.IndexResponse {
 	return &memoryv1.IndexResponse{
-		DocumentId:    docID,
-		ChunksCreated: int32(len(chunks)),
-		Success:       true,
-	}, nil
+		DocumentId:   docID,
+		Success:      false,
+		ErrorMessage: message,
+	}
 }
 
 // SemanticSearch searches for semantically similar content.

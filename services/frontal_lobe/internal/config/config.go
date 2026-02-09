@@ -12,9 +12,17 @@ type Config struct {
 	ServiceName string
 
 	// LLM settings
-	LLMProvider string // "mock", "openai", etc.
+	LLMProvider string // "mock", "openai", "google"
 	LLMModel    string
 	LLMAPIKey   string
+	LLMBaseURL  string // Custom base URL for OpenAI-compatible endpoints
+
+	// Additional providers for routing
+	OpenAIAPIKey   string
+	OpenAIBaseURL  string
+	OpenAIModels   string // Comma-separated list of models, e.g. "gpt-4,gpt-4o"
+	GoogleAPIKey   string
+	GoogleModels   string // Comma-separated list of models, e.g. "gemini-pro,gemini-1.5-pro"
 
 	// Timeouts
 	ReasoningTimeout time.Duration
@@ -31,6 +39,12 @@ func Load() *Config {
 		LLMProvider:      getEnv("LLM_PROVIDER", "mock"),
 		LLMModel:         getEnv("LLM_MODEL", "gpt-4"),
 		LLMAPIKey:        getEnv("LLM_API_KEY", ""),
+		LLMBaseURL:       getEnv("LLM_BASE_URL", ""),
+		OpenAIAPIKey:     getEnv("OPENAI_API_KEY", ""),
+		OpenAIBaseURL:    getEnv("OPENAI_BASE_URL", ""),
+		OpenAIModels:     getEnv("OPENAI_MODELS", ""),
+		GoogleAPIKey:     getEnv("GOOGLE_API_KEY", ""),
+		GoogleModels:     getEnv("GOOGLE_MODELS", ""),
 		ReasoningTimeout: getDurationEnv("REASONING_TIMEOUT", 2*time.Minute),
 		OTelEndpoint:     getEnv("OTEL_ENDPOINT", ""),
 	}
