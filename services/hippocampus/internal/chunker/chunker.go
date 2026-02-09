@@ -58,10 +58,15 @@ func (c *FixedSizeChunker) Chunk(documentID, text string, metadata map[string]st
 			Metadata:   meta,
 		})
 
-		start = end - c.Overlap
-		if start <= start-c.ChunkSize+c.Overlap && end == len(words) {
+		if end >= len(words) {
 			break
 		}
+
+		next := end - c.Overlap
+		if next <= start {
+			next = start + 1
+		}
+		start = next
 		index++
 	}
 

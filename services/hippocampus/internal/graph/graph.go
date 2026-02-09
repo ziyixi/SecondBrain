@@ -85,6 +85,7 @@ func (g *KnowledgeGraph) Query(entity string, maxHops int, relationshipFilter st
 
 	visited := make(map[string]bool)
 	visited[entity] = true
+	visitedEdges := make(map[int]bool)
 
 	type queueItem struct {
 		nodeID string
@@ -104,10 +105,14 @@ func (g *KnowledgeGraph) Query(entity string, maxHops int, relationshipFilter st
 
 		// Outgoing edges
 		for _, idx := range g.adj[current.nodeID] {
+			if visitedEdges[idx] {
+				continue
+			}
 			edge := g.edges[idx]
 			if relationshipFilter != "" && edge.Relationship != relationshipFilter {
 				continue
 			}
+			visitedEdges[idx] = true
 			resultEdges = append(resultEdges, edge)
 			if !visited[edge.Target] {
 				visited[edge.Target] = true
@@ -117,10 +122,14 @@ func (g *KnowledgeGraph) Query(entity string, maxHops int, relationshipFilter st
 
 		// Incoming edges
 		for _, idx := range g.inAdj[current.nodeID] {
+			if visitedEdges[idx] {
+				continue
+			}
 			edge := g.edges[idx]
 			if relationshipFilter != "" && edge.Relationship != relationshipFilter {
 				continue
 			}
+			visitedEdges[idx] = true
 			resultEdges = append(resultEdges, edge)
 			if !visited[edge.Source] {
 				visited[edge.Source] = true
