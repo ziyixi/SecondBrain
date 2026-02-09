@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/ziyixi/SecondBrain/services/cortex/internal/config"
 	"github.com/ziyixi/SecondBrain/services/cortex/internal/middleware"
+	"github.com/ziyixi/SecondBrain/services/cortex/internal/openaicompat"
 	"github.com/ziyixi/SecondBrain/services/cortex/internal/server"
 	agentv1 "github.com/ziyixi/SecondBrain/services/cortex/pkg/gen/agent/v1"
 	commonv1 "github.com/ziyixi/SecondBrain/services/cortex/pkg/gen/common/v1"
@@ -72,6 +75,29 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Set up OpenAI-compatible HTTP API
+	availableModels := []string{"secondbrain", "mock"}
+	openaiHandler := openaicompat.NewHandler(logger, availableModels)
+	if err := openaiHandler.ConnectFrontalLobe(cfg.FrontalLobeAddr); err != nil {
+		logger.Warn("failed to connect OpenAI handler to frontal lobe", "error", err)
+	}
+	defer openaiHandler.Close()
+
+	httpMux := http.NewServeMux()
+	openaiHandler.RegisterRoutes(httpMux)
+
+	// Metrics endpoint
+	metricsStore := cortexServer.MetricsStore()
+	httpMux.HandleFunc("GET /v1/metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(metricsStore.Summary())
+	})
+	httpAddr := fmt.Sprintf(":%d", cfg.HTTPPort)
+	httpServer := &http.Server{
+		Addr:    httpAddr,
+		Handler: httpMux,
+	}
+
 	// Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -84,8 +110,16 @@ func main() {
 		}
 	}()
 
+	go func() {
+		logger.Info("cortex HTTP server starting", "address", httpAddr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("HTTP server failed", "error", err)
+		}
+	}()
+
 	<-ctx.Done()
 	logger.Info("shutting down cortex service...")
 	grpcServer.GracefulStop()
+	httpServer.Shutdown(context.Background())
 	logger.Info("cortex service stopped")
 }

@@ -11,6 +11,7 @@ import (
 	commonv1 "github.com/ziyixi/SecondBrain/services/cortex/pkg/gen/common/v1"
 	ingestionv1 "github.com/ziyixi/SecondBrain/services/cortex/pkg/gen/ingestion/v1"
 	memoryv1 "github.com/ziyixi/SecondBrain/services/cortex/pkg/gen/memory/v1"
+	"github.com/ziyixi/SecondBrain/services/cortex/internal/metrics"
 	"github.com/ziyixi/SecondBrain/services/cortex/internal/session"
 
 	"google.golang.org/grpc"
@@ -27,6 +28,7 @@ type CortexServer struct {
 
 	logger         *slog.Logger
 	sessionMgr     *session.Manager
+	metricsStore   *metrics.Store
 	frontalConn    *grpc.ClientConn
 	hippocampusConn *grpc.ClientConn
 	frontalClient  agentv1.ReasoningEngineClient
@@ -37,10 +39,16 @@ type CortexServer struct {
 // NewCortexServer creates a new CortexServer instance.
 func NewCortexServer(logger *slog.Logger) *CortexServer {
 	return &CortexServer{
-		logger:     logger,
-		sessionMgr: session.NewManager(),
-		version:    "0.1.0",
+		logger:       logger,
+		sessionMgr:   session.NewManager(),
+		metricsStore: metrics.NewStore(),
+		version:      "0.1.0",
 	}
+}
+
+// MetricsStore returns the metrics store for external access (e.g., HTTP API).
+func (s *CortexServer) MetricsStore() *metrics.Store {
+	return s.metricsStore
 }
 
 // ConnectDownstream establishes connections to downstream services.
@@ -161,6 +169,7 @@ func (s *CortexServer) processAgentInput(
 			context = &agentv1.ContextSnapshot{}
 		}
 
+		var contextRelevance float64
 		if s.memoryClient != nil {
 			searchResp, err := s.memoryClient.SemanticSearch(
 				stream.Context(),
@@ -179,6 +188,10 @@ func (s *CortexServer) processAgentInput(
 						RelevanceScore: result.GetScore(),
 						Metadata:       result.GetMetadata(),
 					})
+					contextRelevance += float64(result.GetScore())
+				}
+				if len(searchResp.GetResults()) > 0 {
+					contextRelevance /= float64(len(searchResp.GetResults()))
 				}
 			}
 		}
@@ -186,6 +199,15 @@ func (s *CortexServer) processAgentInput(
 		// Add episodic memory
 		context.EpisodicMemory = sess.GetEpisodicMemory()
 		input.Context = context
+
+		// Record metrics for this interaction
+		s.metricsStore.Record(metrics.InteractionRecord{
+			SessionID:        sessionID,
+			Timestamp:        time.Now(),
+			Query:            query,
+			ContextRelevance: contextRelevance,
+			ResponseQuality:  contextRelevance, // initial estimate from context quality
+		})
 
 		// Forward to Frontal Lobe if connected
 		if s.frontalClient != nil {
@@ -199,6 +221,24 @@ func (s *CortexServer) processAgentInput(
 			OutputType: &agentv1.AgentOutput_FinalResponse{
 				FinalResponse: fmt.Sprintf("Received query: %s (Frontal Lobe not connected)", query),
 			},
+		})
+	}
+
+	// Handle user feedback signals for metrics
+	if feedback := input.GetUserFeedback(); feedback != nil {
+		var feedbackType metrics.FeedbackType
+		switch feedback.GetSentiment() {
+		case agentv1.FeedbackSignal_POSITIVE:
+			feedbackType = metrics.FeedbackPositive
+		case agentv1.FeedbackSignal_NEGATIVE:
+			feedbackType = metrics.FeedbackNegative
+		case agentv1.FeedbackSignal_CORRECTION:
+			feedbackType = metrics.FeedbackCorrection
+		}
+		s.metricsStore.Record(metrics.InteractionRecord{
+			SessionID: sessionID,
+			Timestamp: time.Now(),
+			Feedback:  feedbackType,
 		})
 	}
 
