@@ -53,7 +53,7 @@ This week's progress has been steady across all projects.
 		return `{"title": "Extracted Document", "type": "reference"}`, nil
 	}
 
-	return fmt.Sprintf("Processed: %s", truncate(prompt, 100)), nil
+	return fmt.Sprintf("Processed: %s", Truncate(prompt, 100)), nil
 }
 
 // Classify returns a mock classification.
@@ -76,7 +76,8 @@ func (m *MockLLM) Classify(ctx context.Context, content string, categories []str
 	return "REFERENCE", 0.7, nil
 }
 
-func truncate(s string, maxLen int) string {
+// Truncate truncates a string to maxLen characters, appending "..." if it exceeds the limit.
+func Truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}

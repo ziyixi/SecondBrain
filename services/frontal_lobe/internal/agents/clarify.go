@@ -82,7 +82,7 @@ func (a *ClarifyAgent) Process(ctx context.Context, content, source string, meta
 		case StateExtract:
 			result.ThoughtChain = append(result.ThoughtChain, "Extracting structured metadata...")
 
-			prompt := fmt.Sprintf("Extract key metadata from this %s content: %s", source, truncate(content, 500))
+			prompt := fmt.Sprintf("Extract key metadata from this %s content: %s", source, reasoning.Truncate(content, 500))
 			extracted, err := a.llm.Generate(ctx, prompt)
 			if err != nil {
 				return nil, fmt.Errorf("extraction failed: %w", err)
@@ -95,7 +95,7 @@ func (a *ClarifyAgent) Process(ctx context.Context, content, source string, meta
 		case StateSummarize:
 			result.ThoughtChain = append(result.ThoughtChain, "Summarizing reference content...")
 
-			prompt := fmt.Sprintf("Summarize this content: %s", truncate(content, 500))
+			prompt := fmt.Sprintf("Summarize this content: %s", reasoning.Truncate(content, 500))
 			summary, err := a.llm.Generate(ctx, prompt)
 			if err != nil {
 				return nil, fmt.Errorf("summarization failed: %w", err)
@@ -171,11 +171,4 @@ func determineProject(content string) string {
 		return "Second Brain Development"
 	}
 	return ""
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }
