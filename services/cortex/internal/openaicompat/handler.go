@@ -306,6 +306,8 @@ func extractQueryAndSystem(messages []ChatMessage) (query, systemPrompt string) 
 			query = messages[i].Content
 		}
 		if messages[i].Role == "system" {
+			// Keep overwriting — when iteration finishes, this holds the
+			// earliest (first) system message in the original order.
 			systemPrompt = messages[i].Content
 		}
 	}
