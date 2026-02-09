@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test-cortex:
+    name: Test Cortex Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/cortex
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: services/cortex/go.sum
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cortex-coverage
+          path: services/cortex/coverage.out
+
+  test-gateway:
+    name: Test Gateway Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: services/gateway/go.sum
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-coverage
+          path: services/gateway/coverage.out
+
+  test-hippocampus:
+    name: Test Hippocampus Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/hippocampus
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: services/hippocampus/go.sum
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: hippocampus-coverage
+          path: services/hippocampus/coverage.out
+
+  test-frontal-lobe:
+    name: Test Frontal Lobe Service
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/frontal_lobe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: services/frontal_lobe/go.sum
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontal-lobe-coverage
+          path: services/frontal_lobe/coverage.out
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Vet Cortex
+        run: cd services/cortex && go vet ./...
+      - name: Vet Gateway
+        run: cd services/gateway && go vet ./...
+      - name: Vet Hippocampus
+        run: cd services/hippocampus && go vet ./...
+      - name: Vet Frontal Lobe
+        run: cd services/frontal_lobe && go vet ./...
+
+  build:
+    name: Build Services
+    runs-on: ubuntu-latest
+    needs: [test-cortex, test-gateway, test-hippocampus, test-frontal-lobe, lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Build Cortex
+        run: cd services/cortex && CGO_ENABLED=0 go build -o /dev/null ./cmd/server
+      - name: Build Gateway
+        run: cd services/gateway && CGO_ENABLED=0 go build -o /dev/null ./cmd/server
+      - name: Build Hippocampus
+        run: cd services/hippocampus && CGO_ENABLED=0 go build -o /dev/null ./cmd/server
+      - name: Build Frontal Lobe
+        run: cd services/frontal_lobe && CGO_ENABLED=0 go build -o /dev/null ./cmd/server

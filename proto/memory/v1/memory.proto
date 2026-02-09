@@ -1,0 +1,123 @@
+syntax = "proto3";
+
+package cognitive_os.memory.v1;
+
+option go_package = "github.com/ziyixi/SecondBrain/proto/memory/v1;memoryv1";
+
+import "google/protobuf/timestamp.proto";
+
+// MemoryService is the Hippocampus service responsible for
+// vector memory, knowledge graph, and RAG pipeline.
+service MemoryService {
+  // Index a document into the vector store
+  rpc IndexDocument(IndexRequest) returns (IndexResponse);
+
+  // Search for semantically similar content
+  rpc SemanticSearch(SearchRequest) returns (SearchResponse);
+
+  // Add a triple to the knowledge graph
+  rpc AddGraphTriple(GraphTripleRequest) returns (GraphTripleResponse);
+
+  // Query the knowledge graph
+  rpc QueryGraph(GraphQueryRequest) returns (GraphQueryResponse);
+
+  // Delete a document from the vector store
+  rpc DeleteDocument(DeleteRequest) returns (DeleteResponse);
+
+  // Get indexing statistics
+  rpc GetStats(StatsRequest) returns (StatsResponse);
+}
+
+message IndexRequest {
+  string document_id = 1;
+  string content = 2;
+  map<string, string> metadata = 3;
+  ChunkingStrategy chunking_strategy = 4;
+}
+
+enum ChunkingStrategy {
+  CHUNKING_STRATEGY_UNSPECIFIED = 0;
+  CHUNKING_STRATEGY_FIXED = 1;
+  CHUNKING_STRATEGY_SEMANTIC = 2;
+  CHUNKING_STRATEGY_HIERARCHICAL = 3;
+}
+
+message IndexResponse {
+  string document_id = 1;
+  int32 chunks_created = 2;
+  bool success = 3;
+  string error_message = 4;
+}
+
+message SearchRequest {
+  string query = 1;
+  int32 top_k = 2;
+  map<string, string> filters = 3;
+  float min_score = 4;
+}
+
+message SearchResponse {
+  repeated SearchResult results = 1;
+}
+
+message SearchResult {
+  string chunk_id = 1;
+  string document_id = 2;
+  string content = 3;
+  float score = 4;
+  map<string, string> metadata = 5;
+}
+
+message GraphTripleRequest {
+  string subject = 1;
+  string predicate = 2;
+  string object = 3;
+  map<string, string> metadata = 4;
+}
+
+message GraphTripleResponse {
+  bool success = 1;
+  string triple_id = 2;
+}
+
+message GraphQueryRequest {
+  string entity = 1;
+  int32 max_hops = 2;
+  string relationship_filter = 3;
+}
+
+message GraphQueryResponse {
+  repeated GraphNode nodes = 1;
+  repeated GraphEdge edges = 2;
+}
+
+message GraphNode {
+  string id = 1;
+  string label = 2;
+  map<string, string> properties = 3;
+}
+
+message GraphEdge {
+  string source = 1;
+  string target = 2;
+  string relationship = 3;
+  map<string, string> properties = 4;
+}
+
+message DeleteRequest {
+  string document_id = 1;
+}
+
+message DeleteResponse {
+  bool success = 1;
+  int32 chunks_deleted = 2;
+}
+
+message StatsRequest {}
+
+message StatsResponse {
+  int64 total_documents = 1;
+  int64 total_chunks = 2;
+  int64 total_graph_triples = 3;
+  google.protobuf.Timestamp last_indexed_at = 4;
+}

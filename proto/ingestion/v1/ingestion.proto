@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package cognitive_os.ingestion.v1;
+
+option go_package = "github.com/ziyixi/SecondBrain/proto/ingestion/v1;ingestionv1";
+
+import "google/protobuf/timestamp.proto";
+import "common/v1/common.proto";
+
+// IngestionService handles incoming data from external sources
+// via the Sensory Gateway.
+service IngestionService {
+  // Submit a new inbox item from an external source
+  rpc IngestItem(IngestRequest) returns (IngestResponse);
+
+  // Stream multiple items for batch ingestion
+  rpc StreamIngest(stream IngestRequest) returns (IngestSummary);
+
+  // Get the status of an ingested item
+  rpc GetItemStatus(ItemStatusRequest) returns (ItemStatusResponse);
+
+  // List recent ingested items
+  rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
+}
+
+message IngestRequest {
+  InboxItem item = 1;
+}
+
+message InboxItem {
+  string id = 1;
+  string content = 2;
+  string source = 3;
+  string source_id = 4;
+  google.protobuf.Timestamp received_at = 5;
+  map<string, string> raw_metadata = 6;
+  cognitive_os.common.v1.Priority priority = 7;
+  string content_type = 8;
+}
+
+message IngestResponse {
+  string item_id = 1;
+  bool accepted = 2;
+  string message = 3;
+  cognitive_os.common.v1.ProcessingStatus status = 4;
+}
+
+message IngestSummary {
+  int32 total_received = 1;
+  int32 total_accepted = 2;
+  int32 total_rejected = 3;
+  repeated string rejected_ids = 4;
+}
+
+message ItemStatusRequest {
+  string item_id = 1;
+}
+
+message ItemStatusResponse {
+  string item_id = 1;
+  cognitive_os.common.v1.ProcessingStatus status = 2;
+  string classification = 3;
+  string destination = 4;
+  google.protobuf.Timestamp last_updated = 5;
+}
+
+message ListItemsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+  cognitive_os.common.v1.ProcessingStatus status_filter = 3;
+}
+
+message ListItemsResponse {
+  repeated InboxItem items = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}

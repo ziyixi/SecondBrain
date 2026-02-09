@@ -1,0 +1,58 @@
+version: "3.9"
+
+services:
+  cortex:
+    build:
+      context: ./services/cortex
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"
+      - "8080:8080"
+    environment:
+      - CORTEX_GRPC_PORT=50051
+      - CORTEX_HTTP_PORT=8080
+      - FRONTAL_LOBE_ADDR=frontal-lobe:50052
+      - HIPPOCAMPUS_ADDR=hippocampus:50053
+      - GATEWAY_ADDR=gateway:50054
+      - MCP_SERVER_URL=http://localhost:3000
+    depends_on:
+      - frontal-lobe
+      - hippocampus
+      - gateway
+    restart: unless-stopped
+
+  frontal-lobe:
+    build:
+      context: ./services/frontal_lobe
+      dockerfile: Dockerfile
+    ports:
+      - "50052:50052"
+    environment:
+      - FRONTAL_LOBE_GRPC_PORT=50052
+      - LLM_PROVIDER=mock
+    restart: unless-stopped
+
+  hippocampus:
+    build:
+      context: ./services/hippocampus
+      dockerfile: Dockerfile
+    ports:
+      - "50053:50053"
+    environment:
+      - HIPPOCAMPUS_GRPC_PORT=50053
+      - COLLECTION_NAME=second_brain
+      - EMBEDDING_DIMENSION=384
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    ports:
+      - "50054:50054"
+      - "8081:8081"
+    environment:
+      - GATEWAY_GRPC_PORT=50054
+      - GATEWAY_HTTP_PORT=8081
+      - CORTEX_ADDR=cortex:50051
+    restart: unless-stopped
