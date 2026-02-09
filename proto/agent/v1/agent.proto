@@ -1,0 +1,128 @@
+syntax = "proto3";
+
+package cognitive_os.agent.v1;
+
+option go_package = "github.com/ziyixi/SecondBrain/proto/agent/v1;agentv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// ReasoningEngine is the Frontal Lobe service that handles
+// agentic reasoning and LLM-based processing.
+service ReasoningEngine {
+  // Bidirectional stream: The user streams inputs/interruptions;
+  // the agent streams thoughts, tool calls, and partial answers.
+  rpc StreamThoughtProcess(stream AgentInput) returns (stream AgentOutput);
+
+  // Unary RPC for simple classification tasks
+  rpc ClassifyItem(ClassifyRequest) returns (ClassifyResponse);
+
+  // Generate a weekly review report
+  rpc GenerateWeeklyReview(WeeklyReviewRequest) returns (WeeklyReviewResponse);
+}
+
+message AgentInput {
+  string session_id = 1;
+  oneof input_type {
+    string user_query = 2;
+    ToolResult tool_result = 3;
+    FeedbackSignal user_feedback = 4;
+  }
+  ContextSnapshot context = 5;
+}
+
+message AgentOutput {
+  string session_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  oneof output_type {
+    string thought_chain = 3;
+    ToolCall tool_call = 4;
+    string final_response = 5;
+    StatusUpdate status = 6;
+  }
+}
+
+message ToolCall {
+  string tool_name = 1;
+  string call_id = 2;
+  google.protobuf.Struct arguments = 3;
+  bool requires_confirmation = 4;
+}
+
+message ToolResult {
+  string call_id = 1;
+  bool is_error = 2;
+  string result_payload = 3;
+}
+
+message FeedbackSignal {
+  enum Sentiment {
+    POSITIVE = 0;
+    NEGATIVE = 1;
+    CORRECTION = 2;
+  }
+  Sentiment sentiment = 1;
+  string correction_text = 2;
+}
+
+message ContextSnapshot {
+  repeated string episodic_memory = 1;
+  repeated SemanticChunk semantic_memory = 2;
+  repeated GraphTriple graph_context = 3;
+  map<string, string> user_state = 4;
+  string system_prompt = 5;
+}
+
+message SemanticChunk {
+  string chunk_id = 1;
+  string content = 2;
+  float relevance_score = 3;
+  map<string, string> metadata = 4;
+}
+
+message GraphTriple {
+  string subject = 1;
+  string predicate = 2;
+  string object = 3;
+}
+
+message StatusUpdate {
+  string status_message = 1;
+  float progress = 2;
+}
+
+message ClassifyRequest {
+  string content = 1;
+  string source = 2;
+  map<string, string> metadata = 3;
+}
+
+message ClassifyResponse {
+  enum Classification {
+    ACTIONABLE = 0;
+    REFERENCE = 1;
+    TRASH = 2;
+  }
+  Classification classification = 1;
+  string suggested_project = 2;
+  string suggested_area = 3;
+  string priority = 4;
+  map<string, string> extracted_metadata = 5;
+  float confidence = 6;
+}
+
+message WeeklyReviewRequest {
+  string user_id = 1;
+  google.protobuf.Timestamp start_date = 2;
+  google.protobuf.Timestamp end_date = 3;
+  repeated string completed_tasks = 4;
+  repeated string active_tasks = 5;
+  repeated string blocked_tasks = 6;
+}
+
+message WeeklyReviewResponse {
+  string report_markdown = 1;
+  repeated string stalled_projects = 2;
+  repeated string suggested_next_actions = 3;
+  repeated string dormant_ideas = 4;
+}

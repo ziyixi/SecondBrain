@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package cognitive_os.common.v1;
+
+option go_package = "github.com/ziyixi/SecondBrain/proto/common/v1;commonv1";
+
+import "google/protobuf/timestamp.proto";
+
+// HealthCheck service for all microservices
+service HealthService {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message HealthCheckRequest {
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+  }
+  ServingStatus status = 1;
+  string version = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+// Shared metadata for all items flowing through the system
+message ItemMetadata {
+  string id = 1;
+  string source = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+  map<string, string> labels = 5;
+}
+
+// Priority levels aligned with GTD methodology
+enum Priority {
+  PRIORITY_UNSPECIFIED = 0;
+  PRIORITY_URGENT = 1;
+  PRIORITY_IMPORTANT = 2;
+  PRIORITY_NORMAL = 3;
+  PRIORITY_LOW = 4;
+}
+
+// Processing status for inbox items
+enum ProcessingStatus {
+  PROCESSING_STATUS_UNSPECIFIED = 0;
+  PROCESSING_STATUS_NEW = 1;
+  PROCESSING_STATUS_ANALYZING = 2;
+  PROCESSING_STATUS_CLARIFICATION_NEEDED = 3;
+  PROCESSING_STATUS_FILED = 4;
+  PROCESSING_STATUS_ERROR = 5;
+}
