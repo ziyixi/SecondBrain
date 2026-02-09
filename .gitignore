@@ -7,6 +7,7 @@
 bin/
 dist/
 coverage.out
+services/*/server
 
 # Go
 vendor/
