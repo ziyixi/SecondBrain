@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -192,12 +193,8 @@ func (h *Handler) verifyGitHubSignature(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	// Reset body for later reading
-	r.Body = io.NopCloser(io.LimitReader(io.NopCloser(
-		io.MultiReader(io.NopCloser(
-			io.LimitReader(io.NopCloser(nil), 0)),
-		)),
-		0))
+	// Reset body so it can be read again by the handler
+	r.Body = io.NopCloser(bytes.NewReader(body))
 
 	mac := hmac.New(sha256.New, []byte(h.secret))
 	mac.Write(body)
