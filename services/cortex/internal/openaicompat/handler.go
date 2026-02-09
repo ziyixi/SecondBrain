@@ -183,15 +183,13 @@ func (h *Handler) handleStreamingCompletion(w http.ResponseWriter, r *http.Reque
 	flusher.Flush()
 }
 
-func (h *Handler) callReasoningEngine(ctx context.Context, sessionID, query, systemPrompt, model string) (string, error) {
-	if h.frontalClient == nil {
-		// Fallback: echo response
-		return fmt.Sprintf("Echo: %s (model: %s, no reasoning engine connected)", query, model), nil
-	}
-
+// openReasoningStream opens a bidirectional gRPC stream to the reasoning
+// engine and sends the initial query. Returns the stream or an echo fallback
+// channel if no reasoning engine is connected.
+func (h *Handler) openReasoningStream(ctx context.Context, sessionID, query, systemPrompt string) (agentv1.ReasoningEngine_StreamThoughtProcessClient, error) {
 	stream, err := h.frontalClient.StreamThoughtProcess(ctx)
 	if err != nil {
-		return "", fmt.Errorf("opening stream: %w", err)
+		return nil, fmt.Errorf("opening stream: %w", err)
 	}
 
 	input := &agentv1.AgentInput{
@@ -203,9 +201,22 @@ func (h *Handler) callReasoningEngine(ctx context.Context, sessionID, query, sys
 	}
 
 	if err := stream.Send(input); err != nil {
-		return "", fmt.Errorf("sending input: %w", err)
+		return nil, fmt.Errorf("sending input: %w", err)
 	}
 	stream.CloseSend()
+
+	return stream, nil
+}
+
+func (h *Handler) callReasoningEngine(ctx context.Context, sessionID, query, systemPrompt, model string) (string, error) {
+	if h.frontalClient == nil {
+		return fmt.Sprintf("Echo: %s (model: %s, no reasoning engine connected)", query, model), nil
+	}
+
+	stream, err := h.openReasoningStream(ctx, sessionID, query, systemPrompt)
+	if err != nil {
+		return "", err
+	}
 
 	var finalResponse string
 	for {
@@ -216,7 +227,6 @@ func (h *Handler) callReasoningEngine(ctx context.Context, sessionID, query, sys
 		if err != nil {
 			return "", fmt.Errorf("receiving output: %w", err)
 		}
-
 		if resp := output.GetFinalResponse(); resp != "" {
 			finalResponse = resp
 		}
@@ -239,25 +249,11 @@ func (h *Handler) streamReasoningEngine(ctx context.Context, sessionID, query, s
 		return ch, nil
 	}
 
-	stream, err := h.frontalClient.StreamThoughtProcess(ctx)
+	stream, err := h.openReasoningStream(ctx, sessionID, query, systemPrompt)
 	if err != nil {
 		close(ch)
-		return nil, fmt.Errorf("opening stream: %w", err)
+		return nil, err
 	}
-
-	input := &agentv1.AgentInput{
-		SessionId: sessionID,
-		InputType: &agentv1.AgentInput_UserQuery{UserQuery: query},
-		Context: &agentv1.ContextSnapshot{
-			SystemPrompt: systemPrompt,
-		},
-	}
-
-	if err := stream.Send(input); err != nil {
-		close(ch)
-		return nil, fmt.Errorf("sending input: %w", err)
-	}
-	stream.CloseSend()
 
 	go func() {
 		defer close(ch)
@@ -270,7 +266,6 @@ func (h *Handler) streamReasoningEngine(ctx context.Context, sessionID, query, s
 				h.logger.Error("stream recv error", "error", err)
 				return
 			}
-
 			if thought := output.GetThoughtChain(); thought != "" {
 				ch <- thought + "\n"
 			}
@@ -303,21 +298,15 @@ func (h *Handler) writeError(w http.ResponseWriter, status int, errType, message
 	})
 }
 
-// extractQueryAndSystem separates the user query and system prompt from messages.
+// extractQueryAndSystem extracts the last user message as the query and the
+// first system message as the system prompt from the conversation messages.
 func extractQueryAndSystem(messages []ChatMessage) (query, systemPrompt string) {
-	for _, msg := range messages {
-		switch msg.Role {
-		case "system":
-			systemPrompt = msg.Content
-		case "user":
-			query = msg.Content
-		}
-	}
-	// Use the last user message as the query
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" {
+		if messages[i].Role == "user" && query == "" {
 			query = messages[i].Content
-			break
+		}
+		if messages[i].Role == "system" {
+			systemPrompt = messages[i].Content
 		}
 	}
 	return query, systemPrompt
