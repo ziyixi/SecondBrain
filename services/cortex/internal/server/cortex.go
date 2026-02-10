@@ -51,6 +51,11 @@ func (s *CortexServer) MetricsStore() *metrics.Store {
 	return s.metricsStore
 }
 
+// MemoryClient returns the memory service client for external access (e.g., MCP server).
+func (s *CortexServer) MemoryClient() memoryv1.MemoryServiceClient {
+	return s.memoryClient
+}
+
 // ConnectDownstream establishes connections to downstream services.
 func (s *CortexServer) ConnectDownstream(frontalAddr, hippocampusAddr string) error {
 	var err error
@@ -195,9 +200,10 @@ func (s *CortexServer) handleUserQuery(
 		fmt.Sprintf("Received query: %s (Frontal Lobe not connected)", query))
 }
 
-// enrichContextFromMemory searches Hippocampus for semantically relevant
-// chunks and appends them to the context snapshot. Returns the average
-// relevance score across results (0 if no results or no memory client).
+// enrichContextFromMemory searches Hippocampus for relevant content using
+// hybrid search (BM25 + vector with RRF) and appends matches to the context
+// snapshot. Falls back to semantic-only search when hybrid is unavailable.
+// Returns the average relevance score across results (0 if no results).
 func (s *CortexServer) enrichContextFromMemory(
 	reqCtx context.Context,
 	snapshot *agentv1.ContextSnapshot,
@@ -207,13 +213,20 @@ func (s *CortexServer) enrichContextFromMemory(
 		return 0
 	}
 
-	searchResp, err := s.memoryClient.SemanticSearch(reqCtx, &memoryv1.SearchRequest{
+	searchReq := &memoryv1.SearchRequest{
 		Query: query,
 		TopK:  5,
-	})
+	}
+
+	// Try hybrid search first, fall back to semantic-only
+	searchResp, err := s.memoryClient.HybridSearch(reqCtx, searchReq)
 	if err != nil {
-		s.logger.Warn("failed to search memory", "error", err)
-		return 0
+		s.logger.Debug("hybrid search unavailable, falling back to semantic", "error", err)
+		searchResp, err = s.memoryClient.SemanticSearch(reqCtx, searchReq)
+		if err != nil {
+			s.logger.Warn("failed to search memory", "error", err)
+			return 0
+		}
 	}
 
 	var totalScore float64
