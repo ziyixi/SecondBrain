@@ -16,6 +16,8 @@ import (
 	"github.com/ziyixi/SecondBrain/services/hippocampus/internal/config"
 	"github.com/ziyixi/SecondBrain/services/hippocampus/internal/embedder"
 	"github.com/ziyixi/SecondBrain/services/hippocampus/internal/graph"
+	"github.com/ziyixi/SecondBrain/services/hippocampus/internal/hybrid"
+	"github.com/ziyixi/SecondBrain/services/hippocampus/internal/textindex"
 	"github.com/ziyixi/SecondBrain/services/hippocampus/internal/vectorstore"
 	commonv1 "github.com/ziyixi/SecondBrain/services/hippocampus/pkg/gen/common/v1"
 	memoryv1 "github.com/ziyixi/SecondBrain/services/hippocampus/pkg/gen/memory/v1"
@@ -26,15 +28,16 @@ type HippocampusServer struct {
 	memoryv1.UnimplementedMemoryServiceServer
 	commonv1.UnimplementedHealthServiceServer
 
-	logger     *slog.Logger
-	cfg        *config.Config
-	store      vectorstore.Store
-	embedder   embedder.Embedder
-	kg         *graph.KnowledgeGraph
-	docChunks  map[string][]string // document_id -> chunk_ids
-	mu         sync.RWMutex
+	logger      *slog.Logger
+	cfg         *config.Config
+	store       vectorstore.Store
+	embedder    embedder.Embedder
+	kg          *graph.KnowledgeGraph
+	textIdx     *textindex.Index
+	docChunks   map[string][]string // document_id -> chunk_ids
+	mu          sync.RWMutex
 	lastIndexed time.Time
-	version    string
+	version     string
 }
 
 // NewHippocampusServer creates a new HippocampusServer.
@@ -50,6 +53,7 @@ func NewHippocampusServer(
 		store:     store,
 		embedder:  emb,
 		kg:        graph.New(),
+		textIdx:   textindex.New(),
 		docChunks: make(map[string][]string),
 		version:   "0.1.0",
 	}
@@ -98,6 +102,13 @@ func (s *HippocampusServer) IndexDocument(ctx context.Context, req *memoryv1.Ind
 	s.docChunks[docID] = chunkIDs
 	s.lastIndexed = time.Now()
 	s.mu.Unlock()
+
+	// Also index for full-text search
+	s.textIdx.Add(s.cfg.CollectionName, textindex.Document{
+		ID:       docID,
+		Content:  content,
+		Metadata: req.GetMetadata(),
+	})
 
 	s.logger.Info("indexed document", "document_id", docID, "chunks", len(chunks))
 
@@ -297,10 +308,128 @@ func (s *HippocampusServer) DeleteDocument(ctx context.Context, req *memoryv1.De
 		deleted = n
 	}
 
+	// Also remove from text index
+	s.textIdx.Delete(s.cfg.CollectionName, req.GetDocumentId())
+
 	return &memoryv1.DeleteResponse{
 		Success:       true,
 		ChunksDeleted: int32(deleted),
 	}, nil
+}
+
+// FullTextSearch performs BM25-ranked full-text search.
+// Inspired by qmd's BM25 search via FTS5.
+func (s *HippocampusServer) FullTextSearch(ctx context.Context, req *memoryv1.SearchRequest) (*memoryv1.SearchResponse, error) {
+	if req.GetQuery() == "" {
+		return nil, status.Error(codes.InvalidArgument, "query is required")
+	}
+
+	topK := int(req.GetTopK())
+	if topK <= 0 {
+		topK = 5
+	}
+
+	var filters map[string]string
+	if len(req.GetFilters()) > 0 {
+		filters = make(map[string]string)
+		for k, v := range req.GetFilters() {
+			filters[k] = v
+		}
+	}
+
+	hits := s.textIdx.Search(s.cfg.CollectionName, req.GetQuery(), topK, filters)
+
+	var results []*memoryv1.SearchResult
+	for _, hit := range hits {
+		if req.GetMinScore() > 0 && float32(hit.Score) < req.GetMinScore() {
+			continue
+		}
+		results = append(results, &memoryv1.SearchResult{
+			DocumentId: hit.ID,
+			Content:    hit.Content,
+			Score:      float32(hit.Score),
+			Metadata:   hit.Metadata,
+		})
+	}
+
+	return &memoryv1.SearchResponse{Results: results}, nil
+}
+
+// HybridSearch combines BM25 full-text and vector semantic search
+// using Reciprocal Rank Fusion, inspired by qmd's hybrid query pipeline.
+func (s *HippocampusServer) HybridSearch(ctx context.Context, req *memoryv1.SearchRequest) (*memoryv1.SearchResponse, error) {
+	if req.GetQuery() == "" {
+		return nil, status.Error(codes.InvalidArgument, "query is required")
+	}
+
+	topK := int(req.GetTopK())
+	if topK <= 0 {
+		topK = 5
+	}
+
+	var filters map[string]string
+	if len(req.GetFilters()) > 0 {
+		filters = make(map[string]string)
+		for k, v := range req.GetFilters() {
+			filters[k] = v
+		}
+	}
+
+	// BM25 full-text search
+	ftsHits := s.textIdx.Search(s.cfg.CollectionName, req.GetQuery(), topK*2, filters)
+	var ftsList []hybrid.RankedResult
+	for _, h := range ftsHits {
+		ftsList = append(ftsList, hybrid.RankedResult{
+			ID: h.ID, Score: h.Score, Content: h.Content, Metadata: h.Metadata,
+		})
+	}
+
+	// Vector semantic search
+	embeddings, err := s.embedder.Embed([]string{req.GetQuery()})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "embedding error: %v", err)
+	}
+
+	vecHits, err := s.store.Search(s.cfg.CollectionName, embeddings[0], topK*2, filters)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "vector search error: %v", err)
+	}
+
+	var vecList []hybrid.RankedResult
+	for _, h := range vecHits {
+		vecList = append(vecList, hybrid.RankedResult{
+			ID:       h.Payload["document_id"],
+			Score:    float64(h.Score),
+			Content:  h.Payload["content"],
+			Metadata: h.Payload,
+		})
+	}
+
+	// Reciprocal Rank Fusion with BM25 weighted 2x (original query emphasis)
+	rankedLists := [][]hybrid.RankedResult{ftsList, vecList}
+	weights := []float64{2.0, 1.0}
+	fused := hybrid.ReciprocalRankFusion(rankedLists, weights, 60)
+
+	// Normalize and truncate
+	fused = hybrid.NormalizeScores(fused)
+	if len(fused) > topK {
+		fused = fused[:topK]
+	}
+
+	var results []*memoryv1.SearchResult
+	for _, r := range fused {
+		if req.GetMinScore() > 0 && float32(r.Score) < req.GetMinScore() {
+			continue
+		}
+		results = append(results, &memoryv1.SearchResult{
+			DocumentId: r.ID,
+			Content:    r.Content,
+			Score:      float32(r.Score),
+			Metadata:   r.Metadata,
+		})
+	}
+
+	return &memoryv1.SearchResponse{Results: results}, nil
 }
 
 // GetStats returns indexing statistics.

@@ -15,6 +15,12 @@ service MemoryService {
   // Search for semantically similar content
   rpc SemanticSearch(SearchRequest) returns (SearchResponse);
 
+  // Full-text keyword search using BM25 ranking
+  rpc FullTextSearch(SearchRequest) returns (SearchResponse);
+
+  // Hybrid search combining BM25 + vector with Reciprocal Rank Fusion
+  rpc HybridSearch(SearchRequest) returns (SearchResponse);
+
   // Add a triple to the knowledge graph
   rpc AddGraphTriple(GraphTripleRequest) returns (GraphTripleResponse);
 

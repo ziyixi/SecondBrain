@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/ziyixi/SecondBrain/services/cortex/internal/config"
+	"github.com/ziyixi/SecondBrain/services/cortex/internal/mcpserver"
 	"github.com/ziyixi/SecondBrain/services/cortex/internal/middleware"
 	"github.com/ziyixi/SecondBrain/services/cortex/internal/openaicompat"
 	"github.com/ziyixi/SecondBrain/services/cortex/internal/server"
@@ -85,6 +86,10 @@ func main() {
 
 	httpMux := http.NewServeMux()
 	openaiHandler.RegisterRoutes(httpMux)
+
+	// MCP server endpoint for agentic workflows
+	mcpSrv := mcpserver.NewServer(logger, cortexServer.MemoryClient())
+	httpMux.Handle("POST /mcp", mcpSrv)
 
 	// Metrics endpoint
 	metricsStore := cortexServer.MetricsStore()

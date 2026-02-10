@@ -1051,10 +1051,12 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x1dCHUNKING_STRATEGY_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17CHUNKING_STRATEGY_FIXED\x10\x01\x12\x1e\n" +
 	"\x1aCHUNKING_STRATEGY_SEMANTIC\x10\x02\x12\"\n" +
-	"\x1eCHUNKING_STRATEGY_HIERARCHICAL\x10\x032\xd8\x04\n" +
+	"\x1eCHUNKING_STRATEGY_HIERARCHICAL\x10\x032\x98\x06\n" +
 	"\rMemoryService\x12\\\n" +
 	"\rIndexDocument\x12$.cognitive_os.memory.v1.IndexRequest\x1a%.cognitive_os.memory.v1.IndexResponse\x12_\n" +
-	"\x0eSemanticSearch\x12%.cognitive_os.memory.v1.SearchRequest\x1a&.cognitive_os.memory.v1.SearchResponse\x12i\n" +
+	"\x0eSemanticSearch\x12%.cognitive_os.memory.v1.SearchRequest\x1a&.cognitive_os.memory.v1.SearchResponse\x12_\n" +
+	"\x0eFullTextSearch\x12%.cognitive_os.memory.v1.SearchRequest\x1a&.cognitive_os.memory.v1.SearchResponse\x12]\n" +
+	"\fHybridSearch\x12%.cognitive_os.memory.v1.SearchRequest\x1a&.cognitive_os.memory.v1.SearchResponse\x12i\n" +
 	"\x0eAddGraphTriple\x12*.cognitive_os.memory.v1.GraphTripleRequest\x1a+.cognitive_os.memory.v1.GraphTripleResponse\x12c\n" +
 	"\n" +
 	"QueryGraph\x12).cognitive_os.memory.v1.GraphQueryRequest\x1a*.cognitive_os.memory.v1.GraphQueryResponse\x12_\n" +
@@ -1114,18 +1116,22 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	22, // 10: cognitive_os.memory.v1.StatsResponse.last_indexed_at:type_name -> google.protobuf.Timestamp
 	1,  // 11: cognitive_os.memory.v1.MemoryService.IndexDocument:input_type -> cognitive_os.memory.v1.IndexRequest
 	3,  // 12: cognitive_os.memory.v1.MemoryService.SemanticSearch:input_type -> cognitive_os.memory.v1.SearchRequest
-	6,  // 13: cognitive_os.memory.v1.MemoryService.AddGraphTriple:input_type -> cognitive_os.memory.v1.GraphTripleRequest
-	8,  // 14: cognitive_os.memory.v1.MemoryService.QueryGraph:input_type -> cognitive_os.memory.v1.GraphQueryRequest
-	12, // 15: cognitive_os.memory.v1.MemoryService.DeleteDocument:input_type -> cognitive_os.memory.v1.DeleteRequest
-	14, // 16: cognitive_os.memory.v1.MemoryService.GetStats:input_type -> cognitive_os.memory.v1.StatsRequest
-	2,  // 17: cognitive_os.memory.v1.MemoryService.IndexDocument:output_type -> cognitive_os.memory.v1.IndexResponse
-	4,  // 18: cognitive_os.memory.v1.MemoryService.SemanticSearch:output_type -> cognitive_os.memory.v1.SearchResponse
-	7,  // 19: cognitive_os.memory.v1.MemoryService.AddGraphTriple:output_type -> cognitive_os.memory.v1.GraphTripleResponse
-	9,  // 20: cognitive_os.memory.v1.MemoryService.QueryGraph:output_type -> cognitive_os.memory.v1.GraphQueryResponse
-	13, // 21: cognitive_os.memory.v1.MemoryService.DeleteDocument:output_type -> cognitive_os.memory.v1.DeleteResponse
-	15, // 22: cognitive_os.memory.v1.MemoryService.GetStats:output_type -> cognitive_os.memory.v1.StatsResponse
-	17, // [17:23] is the sub-list for method output_type
-	11, // [11:17] is the sub-list for method input_type
+	3,  // 13: cognitive_os.memory.v1.MemoryService.FullTextSearch:input_type -> cognitive_os.memory.v1.SearchRequest
+	3,  // 14: cognitive_os.memory.v1.MemoryService.HybridSearch:input_type -> cognitive_os.memory.v1.SearchRequest
+	6,  // 15: cognitive_os.memory.v1.MemoryService.AddGraphTriple:input_type -> cognitive_os.memory.v1.GraphTripleRequest
+	8,  // 16: cognitive_os.memory.v1.MemoryService.QueryGraph:input_type -> cognitive_os.memory.v1.GraphQueryRequest
+	12, // 17: cognitive_os.memory.v1.MemoryService.DeleteDocument:input_type -> cognitive_os.memory.v1.DeleteRequest
+	14, // 18: cognitive_os.memory.v1.MemoryService.GetStats:input_type -> cognitive_os.memory.v1.StatsRequest
+	2,  // 19: cognitive_os.memory.v1.MemoryService.IndexDocument:output_type -> cognitive_os.memory.v1.IndexResponse
+	4,  // 20: cognitive_os.memory.v1.MemoryService.SemanticSearch:output_type -> cognitive_os.memory.v1.SearchResponse
+	4,  // 21: cognitive_os.memory.v1.MemoryService.FullTextSearch:output_type -> cognitive_os.memory.v1.SearchResponse
+	4,  // 22: cognitive_os.memory.v1.MemoryService.HybridSearch:output_type -> cognitive_os.memory.v1.SearchResponse
+	7,  // 23: cognitive_os.memory.v1.MemoryService.AddGraphTriple:output_type -> cognitive_os.memory.v1.GraphTripleResponse
+	9,  // 24: cognitive_os.memory.v1.MemoryService.QueryGraph:output_type -> cognitive_os.memory.v1.GraphQueryResponse
+	13, // 25: cognitive_os.memory.v1.MemoryService.DeleteDocument:output_type -> cognitive_os.memory.v1.DeleteResponse
+	15, // 26: cognitive_os.memory.v1.MemoryService.GetStats:output_type -> cognitive_os.memory.v1.StatsResponse
+	19, // [19:27] is the sub-list for method output_type
+	11, // [11:19] is the sub-list for method input_type
 	11, // [11:11] is the sub-list for extension type_name
 	11, // [11:11] is the sub-list for extension extendee
 	0,  // [0:11] is the sub-list for field type_name

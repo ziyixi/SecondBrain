@@ -8,9 +8,9 @@ The system is composed of four microservices, all written in Go, communicating v
 
 | Service | Port | Description |
 |---------|------|-------------|
-| **Cortex** | 50051 | Orchestration, API Gateway, MCP Client, Session Management |
+| **Cortex** | 50051 | Orchestration, API Gateway, MCP Client & Server, Session Management |
 | **Frontal Lobe** | 50052 | Reasoning Engine, Clarify/Reflect Agents, LLM Integration |
-| **Hippocampus** | 50053 | Vector Store, Knowledge Graph, Embeddings, RAG Pipeline |
+| **Hippocampus** | 50053 | Vector Store, Full-Text Index, Hybrid Search, Knowledge Graph, RAG Pipeline |
 | **Sensory Gateway** | 50054 (gRPC) / 8081 (HTTP) | Webhook Ingestion, Polling, Data Normalization |
 
 ```
@@ -83,7 +83,8 @@ cd services/cortex && go run ./cmd/server
 │   │   ├── cmd/server/             # Entry point
 │   │   ├── internal/               # Business logic
 │   │   │   ├── config/             # Configuration
-│   │   │   ├── mcp/                # MCP client
+│   │   │   ├── mcp/                # MCP client (Notion)
+│   │   │   ├── mcpserver/          # MCP server (search tools)
 │   │   │   ├── middleware/         # gRPC interceptors
 │   │   │   ├── server/             # gRPC server implementation
 │   │   │   ├── session/            # Session management
@@ -105,7 +106,9 @@ cd services/cortex && go run ./cmd/server
 │   │       ├── config/
 │   │       ├── embedder/           # Vector embedding
 │   │       ├── graph/              # Knowledge graph
+│   │       ├── hybrid/             # Hybrid search with RRF
 │   │       ├── server/
+│   │       ├── textindex/          # BM25 full-text search
 │   │       └── vectorstore/        # Vector similarity search
 │   └── frontal_lobe/               # Frontal Lobe (Reasoning) service
 │       ├── cmd/server/
@@ -134,6 +137,75 @@ make test-coverage
 
 # With race detection
 cd services/hippocampus && go test -race ./...
+```
+
+## Search Capabilities
+
+The Hippocampus service provides three search modes, inspired by the hybrid search architecture of [qmd](https://github.com/tobi/qmd):
+
+| Mode | RPC | Description |
+|------|-----|-------------|
+| **Semantic Search** | `SemanticSearch` | Vector similarity using cosine distance. Finds conceptually related content even without exact keyword matches. |
+| **Full-Text Search** | `FullTextSearch` | BM25-ranked keyword search. Fast, no embedding required. Best for exact words or phrases. |
+| **Hybrid Search** | `HybridSearch` | Combines BM25 + vector search with Reciprocal Rank Fusion (RRF). Highest quality results. |
+
+### Hybrid Search Pipeline
+
+```
+Query ──► BM25 Full-Text Search (×2 weight)
+  │
+  └────► Vector Semantic Search
+              │
+              └──► Reciprocal Rank Fusion (k=60)
+                       │
+                       └──► Top-Rank Bonus (+0.05 for #1, +0.02 for #2-3)
+                                │
+                                └──► Normalized Results [0.0 - 1.0]
+```
+
+The cortex automatically uses hybrid search when enriching context for LLM reasoning, falling back to semantic-only if unavailable.
+
+## MCP Server
+
+The Cortex exposes an MCP (Model Context Protocol) server at `POST /mcp` for agentic workflows. AI agents can search and retrieve knowledge from the Second Brain.
+
+**Tools exposed:**
+
+| Tool | Description |
+|------|-------------|
+| `search` | Semantic vector search using embeddings |
+| `fts` | Fast BM25 keyword-based full-text search |
+| `hybrid` | Highest quality search combining BM25 + vector + RRF |
+| `status` | Index health: document counts, chunks, graph triples |
+
+**Example JSON-RPC request:**
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "hybrid",
+    "arguments": {
+      "query": "seismic signal detection",
+      "limit": 10,
+      "min_score": 0.3
+    }
+  }
+}
+```
+
+**Claude Desktop configuration** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "secondbrain": {
+      "url": "http://localhost:8080/mcp"
+    }
+  }
+}
 ```
 
 ## CI/CD

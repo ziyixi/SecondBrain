@@ -196,3 +196,103 @@ func TestGetStats(t *testing.T) {
 		t.Errorf("expected 1 triple, got %d", stats.TotalGraphTriples)
 	}
 }
+
+func TestFullTextSearch(t *testing.T) {
+	s := newTestServer()
+	ctx := context.Background()
+
+	// Index documents
+	s.IndexDocument(ctx, &memoryv1.IndexRequest{
+		DocumentId: "doc-1",
+		Content:    "The PhaseNet-TF model extends the original PhaseNet architecture for seismic signal detection using transfer learning techniques.",
+		Metadata:   map[string]string{"type": "research"},
+	})
+	s.IndexDocument(ctx, &memoryv1.IndexRequest{
+		DocumentId: "doc-2",
+		Content:    "Kubernetes deployment patterns for microservices and container orchestration in production environments.",
+		Metadata:   map[string]string{"type": "devops"},
+	})
+
+	// Full-text search
+	resp, err := s.FullTextSearch(ctx, &memoryv1.SearchRequest{
+		Query: "seismic detection",
+		TopK:  5,
+	})
+	if err != nil {
+		t.Fatalf("full-text search error: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Fatal("expected full-text search results")
+	}
+	if resp.Results[0].DocumentId != "doc-1" {
+		t.Errorf("expected doc-1 first, got %q", resp.Results[0].DocumentId)
+	}
+}
+
+func TestFullTextSearchEmptyQuery(t *testing.T) {
+	s := newTestServer()
+	_, err := s.FullTextSearch(context.Background(), &memoryv1.SearchRequest{Query: ""})
+	if err == nil {
+		t.Error("expected error for empty query")
+	}
+}
+
+func TestHybridSearch(t *testing.T) {
+	s := newTestServer()
+	ctx := context.Background()
+
+	// Index documents
+	s.IndexDocument(ctx, &memoryv1.IndexRequest{
+		DocumentId: "doc-1",
+		Content:    "The PhaseNet-TF model extends the original PhaseNet architecture for seismic signal detection using transfer learning techniques.",
+		Metadata:   map[string]string{"type": "research"},
+	})
+	s.IndexDocument(ctx, &memoryv1.IndexRequest{
+		DocumentId: "doc-2",
+		Content:    "Deep learning for earthquake analysis and seismic wave detection using neural networks.",
+		Metadata:   map[string]string{"type": "research"},
+	})
+
+	// Hybrid search
+	resp, err := s.HybridSearch(ctx, &memoryv1.SearchRequest{
+		Query: "seismic detection neural",
+		TopK:  5,
+	})
+	if err != nil {
+		t.Fatalf("hybrid search error: %v", err)
+	}
+	if len(resp.Results) == 0 {
+		t.Fatal("expected hybrid search results")
+	}
+}
+
+func TestHybridSearchEmptyQuery(t *testing.T) {
+	s := newTestServer()
+	_, err := s.HybridSearch(context.Background(), &memoryv1.SearchRequest{Query: ""})
+	if err == nil {
+		t.Error("expected error for empty query")
+	}
+}
+
+func TestFullTextSearchWithMinScore(t *testing.T) {
+	s := newTestServer()
+	ctx := context.Background()
+
+	s.IndexDocument(ctx, &memoryv1.IndexRequest{
+		DocumentId: "doc-1",
+		Content:    "Machine learning algorithms for data processing",
+	})
+
+	resp, err := s.FullTextSearch(ctx, &memoryv1.SearchRequest{
+		Query:    "machine learning",
+		TopK:     5,
+		MinScore: 0.99, // Very high threshold
+	})
+	if err != nil {
+		t.Fatalf("search error: %v", err)
+	}
+	// With only one doc, top score is 1.0 so it should pass
+	if len(resp.Results) != 1 {
+		t.Errorf("expected 1 result above threshold, got %d", len(resp.Results))
+	}
+}
