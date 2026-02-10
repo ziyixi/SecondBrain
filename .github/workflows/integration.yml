@@ -1,0 +1,30 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  integration-tests:
+    name: Integration & Doc Examples
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/cortex
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: services/cortex/go.sum
+
+      - name: Run integration tests
+        run: go test -v -race -run "TestIntegrationFeedbackLoop|TestDocExamples|TestE2EIntegration" ./tests/e2e/
+
+      - name: Run all unit tests
+        run: go test -race ./...
