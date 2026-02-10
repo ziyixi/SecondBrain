@@ -21,6 +21,8 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	MemoryService_IndexDocument_FullMethodName  = "/cognitive_os.memory.v1.MemoryService/IndexDocument"
 	MemoryService_SemanticSearch_FullMethodName = "/cognitive_os.memory.v1.MemoryService/SemanticSearch"
+	MemoryService_FullTextSearch_FullMethodName = "/cognitive_os.memory.v1.MemoryService/FullTextSearch"
+	MemoryService_HybridSearch_FullMethodName   = "/cognitive_os.memory.v1.MemoryService/HybridSearch"
 	MemoryService_AddGraphTriple_FullMethodName = "/cognitive_os.memory.v1.MemoryService/AddGraphTriple"
 	MemoryService_QueryGraph_FullMethodName     = "/cognitive_os.memory.v1.MemoryService/QueryGraph"
 	MemoryService_DeleteDocument_FullMethodName = "/cognitive_os.memory.v1.MemoryService/DeleteDocument"
@@ -38,6 +40,10 @@ type MemoryServiceClient interface {
 	IndexDocument(ctx context.Context, in *IndexRequest, opts ...grpc.CallOption) (*IndexResponse, error)
 	// Search for semantically similar content
 	SemanticSearch(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error)
+	// Full-text keyword search using BM25 ranking
+	FullTextSearch(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error)
+	// Hybrid search combining BM25 + vector with Reciprocal Rank Fusion
+	HybridSearch(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error)
 	// Add a triple to the knowledge graph
 	AddGraphTriple(ctx context.Context, in *GraphTripleRequest, opts ...grpc.CallOption) (*GraphTripleResponse, error)
 	// Query the knowledge graph
@@ -70,6 +76,26 @@ func (c *memoryServiceClient) SemanticSearch(ctx context.Context, in *SearchRequ
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SearchResponse)
 	err := c.cc.Invoke(ctx, MemoryService_SemanticSearch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *memoryServiceClient) FullTextSearch(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchResponse)
+	err := c.cc.Invoke(ctx, MemoryService_FullTextSearch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *memoryServiceClient) HybridSearch(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchResponse)
+	err := c.cc.Invoke(ctx, MemoryService_HybridSearch_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +153,10 @@ type MemoryServiceServer interface {
 	IndexDocument(context.Context, *IndexRequest) (*IndexResponse, error)
 	// Search for semantically similar content
 	SemanticSearch(context.Context, *SearchRequest) (*SearchResponse, error)
+	// Full-text keyword search using BM25 ranking
+	FullTextSearch(context.Context, *SearchRequest) (*SearchResponse, error)
+	// Hybrid search combining BM25 + vector with Reciprocal Rank Fusion
+	HybridSearch(context.Context, *SearchRequest) (*SearchResponse, error)
 	// Add a triple to the knowledge graph
 	AddGraphTriple(context.Context, *GraphTripleRequest) (*GraphTripleResponse, error)
 	// Query the knowledge graph
@@ -150,6 +180,12 @@ func (UnimplementedMemoryServiceServer) IndexDocument(context.Context, *IndexReq
 }
 func (UnimplementedMemoryServiceServer) SemanticSearch(context.Context, *SearchRequest) (*SearchResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SemanticSearch not implemented")
+}
+func (UnimplementedMemoryServiceServer) FullTextSearch(context.Context, *SearchRequest) (*SearchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FullTextSearch not implemented")
+}
+func (UnimplementedMemoryServiceServer) HybridSearch(context.Context, *SearchRequest) (*SearchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method HybridSearch not implemented")
 }
 func (UnimplementedMemoryServiceServer) AddGraphTriple(context.Context, *GraphTripleRequest) (*GraphTripleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddGraphTriple not implemented")
@@ -216,6 +252,42 @@ func _MemoryService_SemanticSearch_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MemoryServiceServer).SemanticSearch(ctx, req.(*SearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MemoryService_FullTextSearch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).FullTextSearch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MemoryService_FullTextSearch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).FullTextSearch(ctx, req.(*SearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MemoryService_HybridSearch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).HybridSearch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MemoryService_HybridSearch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).HybridSearch(ctx, req.(*SearchRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -306,6 +378,14 @@ var MemoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SemanticSearch",
 			Handler:    _MemoryService_SemanticSearch_Handler,
+		},
+		{
+			MethodName: "FullTextSearch",
+			Handler:    _MemoryService_FullTextSearch_Handler,
+		},
+		{
+			MethodName: "HybridSearch",
+			Handler:    _MemoryService_HybridSearch_Handler,
 		},
 		{
 			MethodName: "AddGraphTriple",
