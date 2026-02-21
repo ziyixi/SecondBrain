@@ -1,75 +1,139 @@
-# Second Brain – LLM Proxy & Agentic Memory Engine
+# Second Brain
 
-Go/Gin server that exposes an **OpenAI-compatible** chat API and an **agentic memory** layer: the LLM decides when to read/write via tools (Notion user facts, Qdrant hybrid search).
+An **OpenAI-compatible** chat API with **agentic memory**: the model decides when to remember facts about you and when to search your knowledge base. Use it as a drop-in backend for any app that speaks the OpenAI API.
 
-## Layout
+---
 
-- **`/cmd/server`** – `main.go`, starts Gin on `PORT` (default 8080).
-- **`/internal/api`** – OpenAI request/response types, `POST /v1/chat/completions` handler, router.
-- **`/internal/llm`** – LLM interface and Gemini client (genai SDK, function calling, env-based config).
-- **`/internal/memory`** – Working memory (last N messages), Notion user-fact store, Qdrant knowledge base (hybrid search), Notion page fetcher.
-- **`/llm/Dockerfile`** – Multi-stage build; run with build context at repo root: `docker build -f ./llm/Dockerfile .`
+## Why this project
 
-## Environment
+- **Your AI should remember you** — Store and recall user facts (e.g. “my favorite color is blue”) via tools, not hard-coded prompts.
+- **Your AI should know your docs** — Search a vector store (Notion-backed or custom) when answering; the model chooses when to call the search tool.
+- **One API, any client** — Same `POST /v1/chat/completions` contract as OpenAI. Use it from existing UIs, SDKs, or agents without changing your client code.
+- **Layered memory** — Short-term (conversation window), user profile (Notion), and knowledge base (Qdrant hybrid search) work together so the model has context when it needs it.
 
-| Variable | Purpose |
-|----------|---------|
-| `PORT` | HTTP port (default `8080`). App reads this; do not substitute in Docker `CMD`. |
-| `GOOGLE_API_KEY` | Gemini API key. |
-| `GEMINI_CHAT_MODEL` | Chat model (default `gemini-2.5-flash`). |
-| `GEMINI_EMBEDDING_MODEL` | Embedding model (default `text-embedding-004`). |
-| `GEMINI_MAX_OUTPUT_TOKENS` | Max tokens (default 2048). |
-| `GEMINI_TEMPERATURE` | Temperature (0–2). |
-| `NOTION_TOKEN` | Notion API token (optional). |
-| `NOTION_USER_PROFILE_PAGE_ID` | Notion page ID for user profile/facts (optional). |
-| `QDRANT_HOST`, `QDRANT_PORT` | Qdrant host/port (optional). |
-| `QDRANT_COLLECTION` | Collection name (default `knowledge`). |
+---
 
-## Memory & Tools
+## How it works
 
-- **Working memory:** Last N messages of the current conversation (configurable).
-- **User facts (Notion):** Tool `UpsertUserFact(fact)`. Profile page content is injected into the system prompt.
-- **Knowledge base (Qdrant):** Tool `SearchKnowledgeBase(query)`. Lazy embedding + hybrid (dense + keyword) search; retrieved text is truncated to ~1500 tokens. Optional Notion fetcher for full page text.
+The server accepts OpenAI-format chat requests, injects **user profile** and **working memory** into the system prompt, and gives the LLM **tools** to read/write memory. The model can call `UpsertUserFact` to save facts (e.g. to Notion) and `SearchKnowledgeBase` to query your docs (Qdrant). Tool results are fed back into the model until it returns a final reply.
 
-## Build & Run
+```mermaid
+flowchart LR
+    subgraph Client
+        A[App / CLI / UI]
+    end
 
-**Using Make (from repo root):**
+    subgraph SecondBrain["Second Brain API"]
+        B[OpenAI-compatible endpoint]
+        C[Working memory]
+        D[Tool executor]
+    end
 
-```bash
-make env          # copy .env.example → .env (once)
-# Edit .env and set GOOGLE_API_KEY (and optionally Notion/Qdrant vars)
-make build        # build Go binary
-make run          # run binary (loads .env)
-make up           # start full stack (server + Qdrant) via Docker Compose
-make down         # stop full stack
-make docker-build # build image
-make docker-run   # run image with .env
-make compose-up   # start Qdrant only (for local dev / tests)
-make compose-down # stop Qdrant
-make test-unit    # unit tests only
-make test-integration  # integration tests (Docker Compose)
-make test         # all tests
+    subgraph Memory["Memory layer"]
+        E[User facts]
+        F[Knowledge base]
+    end
+
+    subgraph External["External services"]
+        G[(Notion)]
+        H[(Qdrant)]
+        I[Gemini]
+    end
+
+    A -->|POST /v1/chat/completions| B
+    B --> C
+    B -->|system + messages + tools| I
+    I -->|tool calls| D
+    D --> E
+    D --> F
+    E --> G
+    F --> H
+    D -->|tool results| I
+    I -->|final reply| B
+    B --> A
 ```
 
-**Full stack with Docker Compose:** From repo root, `docker-compose.yml` runs the server and Qdrant. The server gets `QDRANT_HOST=qdrant` and `QDRANT_PORT=6334`; other vars come from `.env`. Run `make up` (or `docker compose up -d --build`) then open `http://localhost:8080/health`.
+**In short:** Your client sends messages → the API adds profile + working memory and calls Gemini with tools → the model may call **UpsertUserFact** (Notion) or **SearchKnowledgeBase** (Qdrant) → the API runs those and returns tool results to the model → the model replies → you get the final answer.
 
-**Manual:**
+---
+
+## Get started
+
+### 1. Prerequisites
+
+- **Go 1.24+** (for local run) or **Docker** (for container run)
+- **Google AI API key** (Gemini) — [Create one](https://aistudio.google.com/apikey)
+- Optional: **Notion** (user facts), **Qdrant** (knowledge search)
+
+### 2. Clone and set environment
 
 ```bash
-cp .env.example .env   # then edit .env
-go build -o server ./cmd/server
-./server   # or: set -a && . ./.env && set +a && ./server
-
-docker build -f ./llm/Dockerfile -t secondbrain .
-docker run --rm -p 8080:8080 --env-file .env secondbrain
+git clone https://github.com/yourusername/secondbrain.git
+cd secondbrain
+cp .env.example .env
 ```
 
-## Tests
+Edit `.env` and set at least:
 
-- **Fakes:** Mock services (LLM, Notion fact store, Notion page fetcher) live in **`test/fakes/`** for integration tests without external APIs.
-- **Fake Go server:** Integration tests use a **real HTTP server process** (`cmd/integration-server`), not just in-process mocks. That binary wires the same API with faked LLM/Notion and real Qdrant; tests start it, send HTTP requests to it, then assert on responses.
-- **Docker Compose:** Integration tests use **`test/integration/docker-compose.yml`** to start Qdrant. The test builds and runs the integration-server, seeds Qdrant, then hits the server over HTTP.
-- **Unit:** `go test ./... -short` (skips integration).
-- **Integration:** `go test ./...` (requires Docker and `docker compose`). Starts Qdrant via compose, starts the fake Go server, runs tests, then tears down. Each test uses a free host port to avoid conflicts.
+```bash
+GOOGLE_API_KEY=your-gemini-api-key
+```
 
-CI runs `go test -v ./...` and then builds/pushes the image to GHCR (see `.github/workflows/deploy.yml`).
+Optionally set `NOTION_TOKEN` and `NOTION_USER_PROFILE_PAGE_ID` for user facts, and use the full stack (step 4) for the knowledge base.
+
+### 3. Run the server
+
+**Option A — Binary (quickest):**
+
+```bash
+make env    # if you haven’t copied .env yet
+make build
+make run
+```
+
+**Option B — Full stack with Docker (server + Qdrant):**
+
+```bash
+make up
+```
+
+The API will be at **http://localhost:8080**. Check health: **http://localhost:8080/health**.
+
+### 4. Send your first request
+
+```bash
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "default",
+    "messages": [{"role": "user", "content": "Remember that I prefer dark mode."}]
+  }'
+```
+
+With Notion configured, the model can store that as a user fact. Ask “What do I prefer?” and it can recall it.
+
+For **knowledge search**, run the full stack (`make up`) so Qdrant is available; then ask questions that require searching your indexed content.
+
+### 5. Use in your app
+
+Use the same URL as your OpenAI base URL:
+
+- **Base URL:** `http://localhost:8080` (or your deployed URL)
+- **Endpoint:** `POST /v1/chat/completions`
+- **Models:** Use any string (e.g. `default`); the server uses Gemini under the hood.
+
+Optional header: `X-User-ID: <id>` to scope user facts to a profile.
+
+---
+
+## What’s next
+
+- **User facts:** Set `NOTION_TOKEN` and `NOTION_USER_PROFILE_PAGE_ID` in `.env` so the model can read/write your Notion user profile.
+- **Knowledge base:** Run `make up` to start Qdrant; index content via your own pipeline and the server will search it when the model calls the tool.
+- **Deploy:** Build the Docker image and run it with your `.env` (see [Tech details](TECH.md#build--run) for commands and CI).
+
+---
+
+## Tech details
+
+For **architecture**, **environment variables**, **build & run**, **testing**, and **CI**, see **[TECH.md](TECH.md)**.

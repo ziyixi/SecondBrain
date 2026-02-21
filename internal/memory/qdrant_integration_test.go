@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,24 +34,41 @@ func getFreePort(t *testing.T) string {
 	return port
 }
 
-func startCompose(t *testing.T, composePath string, projectName string, hostPort string) {
+// startCompose runs docker compose up and waits for Qdrant gRPC TCP then REST /readyz (so gRPC is ready in CI).
+func startCompose(t *testing.T, composePath string, projectName string, grpcPort string, httpPort string) {
 	dir := filepath.Dir(composePath)
 	cmd := exec.Command("docker", "compose", "-p", projectName, "-f", composePath, "up", "-d")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "QDRANT_HOST_PORT="+hostPort)
+	cmd.Env = append(os.Environ(), "QDRANT_GRPC_PORT="+grpcPort, "QDRANT_HTTP_PORT="+httpPort)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("docker compose up: %v\n%s", err, out)
 	}
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
+	var tcpOK bool
 	for time.Now().Before(deadline) {
-		c, err := net.Dial("tcp", "127.0.0.1:"+hostPort)
+		c, err := net.Dial("tcp", "127.0.0.1:"+grpcPort)
 		if err == nil {
 			c.Close()
-			return
+			tcpOK = true
+			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	t.Fatalf("timeout waiting for Qdrant on %s", hostPort)
+	if !tcpOK {
+		t.Fatalf("timeout waiting for Qdrant gRPC TCP on %s", grpcPort)
+	}
+	readyURL := "http://127.0.0.1:" + httpPort + "/readyz"
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(readyURL)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for Qdrant readyz on %s", httpPort)
 }
 
 func stopCompose(composePath string, projectName string) {
@@ -68,12 +86,13 @@ func TestQdrantKnowledgeBase_Integration(t *testing.T) {
 	}
 	composeFile := composePath(t)
 	projectName := "secondbrain-memory-integration"
-	hostPort := getFreePort(t)
-	startCompose(t, composeFile, projectName, hostPort)
+	grpcPort := getFreePort(t)
+	httpPort := getFreePort(t)
+	startCompose(t, composeFile, projectName, grpcPort, httpPort)
 	defer stopCompose(composeFile, projectName)
 
 	os.Setenv("QDRANT_HOST", "127.0.0.1")
-	os.Setenv("QDRANT_PORT", hostPort)
+	os.Setenv("QDRANT_PORT", grpcPort)
 	defer os.Unsetenv("QDRANT_HOST")
 	defer os.Unsetenv("QDRANT_PORT")
 

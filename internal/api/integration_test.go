@@ -55,26 +55,43 @@ func composePath(t *testing.T) string {
 	return ""
 }
 
-// startCompose runs `docker compose -p <project> -f <path> up -d` and waits for Qdrant on hostPort.
-// hostPort is passed as QDRANT_HOST_PORT so the compose file binds to it (avoids conflicts).
-func startCompose(t *testing.T, composePath string, projectName string, hostPort string) {
+// startCompose runs `docker compose -p <project> -f <path> up -d` and waits for Qdrant.
+// grpcPort and httpPort are used for QDRANT_GRPC_PORT and QDRANT_HTTP_PORT (gRPC for client, REST for /readyz).
+// Waits for TCP on gRPC port then for HTTP GET /readyz on REST port so Qdrant is ready (avoids "connection reset by peer" in CI).
+func startCompose(t *testing.T, composePath string, projectName string, grpcPort string, httpPort string) {
 	dir := filepath.Dir(composePath)
 	cmd := exec.Command("docker", "compose", "-p", projectName, "-f", composePath, "up", "-d")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "QDRANT_HOST_PORT="+hostPort)
+	cmd.Env = append(os.Environ(), "QDRANT_GRPC_PORT="+grpcPort, "QDRANT_HTTP_PORT="+httpPort)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("docker compose up: %v\n%s", err, out)
 	}
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
+	var tcpOK bool
 	for time.Now().Before(deadline) {
-		c, err := net.Dial("tcp", "127.0.0.1:"+hostPort)
+		c, err := net.Dial("tcp", "127.0.0.1:"+grpcPort)
 		if err == nil {
 			c.Close()
-			return
+			tcpOK = true
+			break
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	t.Fatalf("timeout waiting for Qdrant on %s", hostPort)
+	if !tcpOK {
+		t.Fatalf("timeout waiting for Qdrant gRPC TCP on %s", grpcPort)
+	}
+	readyURL := "http://127.0.0.1:" + httpPort + "/readyz"
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(readyURL)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for Qdrant readyz on %s", httpPort)
 }
 
 // stopCompose runs `docker compose -p <project> -f <path> down`.
@@ -110,13 +127,14 @@ func TestIntegration_MemorySearchAndGoal(t *testing.T) {
 	composeFile := composePath(t)
 	root := repoRoot(t)
 	projectName := "secondbrain-api-integration"
-	qdrantPort := getFreePort(t)
+	grpcPort := getFreePort(t)
+	httpPort := getFreePort(t)
 	serverPort := getFreePort(t)
-	startCompose(t, composeFile, projectName, qdrantPort)
+	startCompose(t, composeFile, projectName, grpcPort, httpPort)
 	defer stopCompose(composeFile, projectName)
 
 	os.Setenv("QDRANT_HOST", "127.0.0.1")
-	os.Setenv("QDRANT_PORT", qdrantPort)
+	os.Setenv("QDRANT_PORT", grpcPort)
 	defer os.Unsetenv("QDRANT_HOST")
 	defer os.Unsetenv("QDRANT_PORT")
 
@@ -141,7 +159,7 @@ func TestIntegration_MemorySearchAndGoal(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build integration-server: %v\n%s", err, out)
 	}
-	serverEnv := append(os.Environ(), "PORT="+serverPort, "QDRANT_HOST=127.0.0.1", "QDRANT_PORT="+qdrantPort)
+	serverEnv := append(os.Environ(), "PORT="+serverPort, "QDRANT_HOST=127.0.0.1", "QDRANT_PORT="+grpcPort)
 	serverCmd := exec.Command(binPath)
 	serverCmd.Dir = root
 	serverCmd.Env = serverEnv
