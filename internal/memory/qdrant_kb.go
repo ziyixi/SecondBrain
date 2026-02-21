@@ -93,7 +93,9 @@ func (q *QdrantKnowledgeBase) ensureCollection(ctx context.Context, vectorSize u
 	return nil
 }
 
-// Upsert stores or updates a document by Notion page ID (embedding is generated lazily on first Search if needed).
+// Upsert stores in Qdrant only the embedding vector and the Notion page ID.
+// The full knowledge content lives in Notion; Qdrant is a lightweight vector index for retrieval.
+// We use text only to compute the embedding; no document text is stored in Qdrant.
 func (q *QdrantKnowledgeBase) Upsert(ctx context.Context, notionPageID string, text string) error {
 	vec, err := q.embedder(ctx, text)
 	if err != nil {
@@ -106,7 +108,6 @@ func (q *QdrantKnowledgeBase) Upsert(ctx context.Context, notionPageID string, t
 	if _, err := uuid.Parse(notionPageID); err != nil {
 		pointID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(notionPageID)).String()
 	}
-	trunc := truncateText(text, maxTextChars)
 	wait := true
 	_, err = q.qc.Upsert(ctx, &qdrant.UpsertPoints{
 		CollectionName: q.collection,
@@ -117,7 +118,6 @@ func (q *QdrantKnowledgeBase) Upsert(ctx context.Context, notionPageID string, t
 				Vectors: qdrant.NewVectors(vec...),
 				Payload: qdrant.NewValueMap(map[string]any{
 					"notion_page_id": notionPageID,
-					"text":           trunc,
 				}),
 			},
 		},
@@ -125,7 +125,9 @@ func (q *QdrantKnowledgeBase) Upsert(ctx context.Context, notionPageID string, t
 	return err
 }
 
-// Search runs hybrid search: dense vector search in Qdrant + simple keyword score over payload text, then RRF merge.
+// Search runs vector search in Qdrant (vectors + notion_page_id only), then fetches full text from Notion.
+// Notion is the source of truth for knowledge; Qdrant only holds the vector → page ID index.
+// If fetcher is set, we fetch each hit's text from Notion and optionally re-rank by keyword (hybrid).
 func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit int) ([]DocumentHit, error) {
 	if limit <= 0 {
 		limit = 5
@@ -137,7 +139,6 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 	if err := q.ensureCollection(ctx, uint64(len(queryVec))); err != nil {
 		return nil, err
 	}
-	// Fetch more for hybrid re-rank; then we'll do keyword scoring and RRF
 	prefetchLimit := limit * 3
 	if prefetchLimit < 20 {
 		prefetchLimit = 20
@@ -151,21 +152,13 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 	if err != nil {
 		return nil, err
 	}
-	// Build keyword score (simple token overlap) and RRF merge with dense rank
-	queryTokens := tokenizeLower(query)
 	type scoredDoc struct {
 		pageID string
-		text   string
 		rrf    float64
 	}
 	byID := make(map[string]*scoredDoc)
 	for rank, sp := range scored {
-		pageID := ""
-		text := ""
-		if sp.Payload != nil {
-			pageID = valueAsString(sp.Payload, "notion_page_id")
-			text = valueAsString(sp.Payload, "text")
-		}
+		pageID := valueAsString(sp.Payload, "notion_page_id")
 		if pageID == "" && sp.Id != nil {
 			pageID = sp.Id.GetUuid()
 			if pageID == "" {
@@ -180,14 +173,11 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 			d.rrf += rrfDense
 			continue
 		}
-		kwScore := keywordScore(queryTokens, text)
-		rrfKw := 1.0 / (float64(rrfK) + 1.0/(kwScore+0.01))
-		byID[pageID] = &scoredDoc{pageID: pageID, text: text, rrf: rrfDense + rrfKw}
+		byID[pageID] = &scoredDoc{pageID: pageID, rrf: rrfDense}
 	}
-	// Sort by RRF and take top limit; optionally fetch full text via fetcher
 	var out []DocumentHit
 	for _, d := range byID {
-		text := d.text
+		text := ""
 		if q.fetcher != nil {
 			full, err := q.fetcher.GetPageText(ctx, d.pageID)
 			if err == nil && full != "" {
@@ -196,10 +186,19 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 		}
 		out = append(out, DocumentHit{NotionPageID: d.pageID, Text: text, Score: d.rrf})
 	}
-	// Sort by score desc and trim to limit
 	sortByScoreDesc(out)
 	if len(out) > limit {
 		out = out[:limit]
+	}
+	// Optional: re-rank by keyword over fetched text (hybrid)
+	if q.fetcher != nil && len(out) > 0 {
+		queryTokens := tokenizeLower(query)
+		for _, h := range out {
+			kwScore := keywordScore(queryTokens, h.Text)
+			rrfKw := 1.0 / (float64(rrfK) + 1.0/(kwScore+0.01))
+			h.Score += rrfKw
+		}
+		sortByScoreDesc(out)
 	}
 	return out, nil
 }

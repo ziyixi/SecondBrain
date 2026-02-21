@@ -7,15 +7,15 @@ An **OpenAI-compatible** chat API with **agentic memory**: the model decides whe
 ## Why this project
 
 - **Your AI should remember you** — Store and recall user facts (e.g. “my favorite color is blue”) via tools, not hard-coded prompts.
-- **Your AI should know your docs** — Search a vector store (Notion-backed or custom) when answering; the model chooses when to call the search tool.
+- **Your AI should know your docs** — The **knowledge graph lives in a Notion database**. Qdrant stores only **vector → Notion page ID** mappings so retrieval stays lightweight and scalable; full content is loaded from Notion when the model searches.
 - **One API, any client** — Same `POST /v1/chat/completions` contract as OpenAI. Use it from existing UIs, SDKs, or agents without changing your client code.
-- **Layered memory** — Short-term (conversation window), user profile (Notion), and knowledge base (Qdrant hybrid search) work together so the model has context when it needs it.
+- **Layered memory** — Short-term (conversation window), user profile (Notion), and knowledge base (vector index in Qdrant, content in Notion) work together so the model has context when it needs it.
 
 ---
 
 ## How it works
 
-The server accepts OpenAI-format chat requests, injects **user profile** and **working memory** into the system prompt, and gives the LLM **tools** to read/write memory. The model can call `UpsertUserFact` to save facts (e.g. to Notion) and `SearchKnowledgeBase` to query your docs (Qdrant). Tool results are fed back into the model until it returns a final reply.
+The server accepts OpenAI-format chat requests, injects **user profile** and **working memory** into the system prompt, and gives the LLM **tools** to read/write memory. The model can call `UpsertUserFact` to save facts to Notion and `SearchKnowledgeBase` to query your knowledge base. For search: **Qdrant holds only vectors and Notion page IDs**; the **Notion database is the source of truth** for all knowledge content. At query time we fetch full page text from Notion so the model gets the content it needs without storing large docs in Qdrant.
 
 ```mermaid
 flowchart LR
@@ -31,12 +31,12 @@ flowchart LR
 
     subgraph Memory["Memory layer"]
         E[User facts]
-        F[Knowledge base]
+        F[Vector index]
     end
 
     subgraph External["External services"]
-        G[(Notion)]
-        H[(Qdrant)]
+        G[(Notion DB / pages)]
+        H[(Qdrant: vectors + page IDs)]
         I[Gemini]
     end
 
@@ -47,13 +47,15 @@ flowchart LR
     D --> E
     D --> F
     E --> G
-    F --> H
+    F -->|query vector| H
+    H -->|page IDs| F
+    F -->|fetch content| G
     D -->|tool results| I
     I -->|final reply| B
     B --> A
 ```
 
-**In short:** Your client sends messages → the API adds profile + working memory and calls Gemini with tools → the model may call **UpsertUserFact** (Notion) or **SearchKnowledgeBase** (Qdrant) → the API runs those and returns tool results to the model → the model replies → you get the final answer.
+**In short:** Your client sends messages → the API adds profile + working memory and calls Gemini with tools → the model may call **UpsertUserFact** (Notion) or **SearchKnowledgeBase** → the API queries **Qdrant** (vectors + page IDs only), then **fetches full content from Notion** for each hit → tool results go back to the model → you get the final answer. Knowledge stays in Notion; Qdrant stays small and scalable.
 
 ---
 
@@ -112,7 +114,7 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 
 With Notion configured, the model can store that as a user fact. Ask “What do I prefer?” and it can recall it.
 
-For **knowledge search**, run the full stack (`make up`) so Qdrant is available; then ask questions that require searching your indexed content.
+For **knowledge search**, run the full stack (`make up`) and point the server at a **Notion database** that holds your knowledge. Index that database into Qdrant (vectors + page IDs only); at query time the server fetches the actual content from Notion.
 
 ### 5. Use in your app
 
@@ -129,7 +131,7 @@ Optional header: `X-User-ID: <id>` to scope user facts to a profile.
 ## What’s next
 
 - **User facts:** Set `NOTION_TOKEN` and `NOTION_USER_PROFILE_PAGE_ID` in `.env` so the model can read/write your Notion user profile.
-- **Knowledge base:** Run `make up` to start Qdrant; index content via your own pipeline and the server will search it when the model calls the tool.
+- **Knowledge base:** Store your knowledge in a **Notion database**. Run `make up` (server + Qdrant); index that database so Qdrant has vectors and Notion page IDs only. The server fetches full content from Notion when the model searches—so Qdrant stays small and Notion remains the source of truth.
 - **Deploy:** Build the Docker image and run it with your `.env` (see [Tech details](TECH.md#build--run) for commands and CI).
 
 ---

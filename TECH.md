@@ -42,7 +42,9 @@ Copy `.env.example` to `.env` and fill in values.
 
 - **Working memory** — Last N messages of the current conversation (configurable). Used as in-context history for the LLM.
 - **User facts (Notion)** — Tool `UpsertUserFact(fact)`. Profile page content is injected into the system prompt; the model can append facts via the tool.
-- **Knowledge base (Qdrant)** — Tool `SearchKnowledgeBase(query)`. Lazy embedding + hybrid (dense + keyword) search; retrieved text is truncated to ~1500 tokens. Optional Notion fetcher for full page text.
+- **Knowledge base (Notion + Qdrant)** — The **knowledge graph lives in a Notion database**; storing full content in Qdrant would be too large and not scale. So:
+  - **Qdrant** stores only **vectors and Notion page ID** per point (no document text). It is a lightweight vector index for retrieval.
+  - **Notion** is the source of truth for all knowledge content. At index time you embed Notion pages and upsert (vector, page_id) into Qdrant. At query time the server runs vector search in Qdrant, gets back page IDs, then **fetches full text from Notion** via the Notion page fetcher. Retrieved text is truncated to ~1500 tokens before being sent to the model. Optional keyword re-rank is applied over the fetched text for hybrid scoring.
 
 ---
 
