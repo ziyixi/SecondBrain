@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"github.com/yourusername/secondbrain/internal/api"
+	"github.com/yourusername/secondbrain/internal/config"
 	"github.com/yourusername/secondbrain/internal/llm"
 	"github.com/yourusername/secondbrain/internal/memory"
 	"github.com/yourusername/secondbrain/test/fakes"
@@ -37,7 +38,7 @@ func main() {
 		},
 	)
 
-	working := memory.NewWorkingMemory(20)
+	working := memory.NewWorkingMemory(config.WorkingMemorySize())
 	facts := fakes.NewInMemoryFactStore()
 
 	var kb memory.KnowledgeBase

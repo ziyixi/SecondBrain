@@ -9,17 +9,24 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/yourusername/secondbrain/internal/config"
 	"github.com/yourusername/secondbrain/internal/llm"
 	"github.com/yourusername/secondbrain/internal/memory"
 )
 
+// Memorizer is optional; when set, the LLM can call MemorizeInformation(topic, content).
+type Memorizer interface {
+	MemorizeInformation(ctx context.Context, topic string, content string) (message string, err error)
+}
+
 // ChatHandler handles POST /v1/chat/completions with LLM and memory.
 type ChatHandler struct {
-	LLM     llm.Client
-	Working memory.WorkingMemory
-	Facts   memory.UserFactStore
-	KB      memory.KnowledgeBase
-	UserID  string // optional; for profile/facts
+	LLM       llm.Client
+	Working   memory.WorkingMemory
+	Facts     memory.UserFactStore
+	KB        memory.KnowledgeBase
+	Memorizer Memorizer // optional; dynamic categorization (Notion + Qdrant)
+	UserID    string    // optional; for profile/facts
 }
 
 // HandleChatCompletions implements the OpenAI-compatible chat completions endpoint.
@@ -44,6 +51,9 @@ func (h *ChatHandler) HandleChatCompletions(c *gin.Context) {
 
 	// Build system prompt: include user profile (facts) from Notion
 	systemPrompt := "You are a helpful assistant with access to memory tools. Use UpsertUserFact to save important facts about the user. Use SearchKnowledgeBase to search the knowledge base when needed."
+	if h.Memorizer != nil {
+		systemPrompt += " Use MemorizeInformation(topic, content) to store information under a topic; the system will create or update a category page in the knowledge base."
+	}
 	if h.Facts != nil {
 		profile, err := h.Facts.GetProfile(c.Request.Context(), userID)
 		if err == nil && profile != "" {
@@ -61,11 +71,11 @@ func (h *ChatHandler) HandleChatCompletions(c *gin.Context) {
 	}
 
 	tools := h.buildTools()
-	maxTokens := 2048
+	maxTokens := config.DefaultMaxTokens()
 	if req.MaxTokens != nil {
 		maxTokens = *req.MaxTokens
 	}
-	temp := float32(0.7)
+	temp := config.DefaultTemperature()
 	if req.Temperature != nil {
 		temp = *req.Temperature
 	}
@@ -81,7 +91,7 @@ func (h *ChatHandler) HandleChatCompletions(c *gin.Context) {
 	}
 
 	var lastContent string
-	for iter := 0; iter < 10; iter++ {
+	for iter := 0; iter < config.ChatToolLoopMaxIter(); iter++ {
 		out, err := h.LLM.Generate(c.Request.Context(), input)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -138,7 +148,7 @@ func (h *ChatHandler) buildTools() []llm.ToolDef {
 		},
 		{
 			Name:        "SearchKnowledgeBase",
-			Description: "Search the knowledge base (Notion-backed documents) with a query. Use when you need to look up information from the user's documents.",
+			Description: "Search the knowledge base (Notion-backed documents) with a query. Use when you need to look up information from the user's documents. Returns consolidated text from the most relevant Notion pages.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -147,6 +157,20 @@ func (h *ChatHandler) buildTools() []llm.ToolDef {
 				"required": []any{"query"},
 			},
 		},
+	}
+	if h.Memorizer != nil {
+		tools = append(tools, llm.ToolDef{
+			Name:        "MemorizeInformation",
+			Description: "Store information under a topic in the knowledge base. The system will either append to an existing similar category (if topic is similar to an existing one) or create a new Notion page. Use for facts, notes, or content the user wants to remember.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"topic":   map[string]any{"type": "string", "description": "Category or topic name (e.g. 'Project X', 'Meeting notes')"},
+					"content": map[string]any{"type": "string", "description": "The information to store"},
+				},
+				"required": []any{"topic", "content"},
+			},
+		})
 	}
 	return tools
 }
@@ -214,6 +238,20 @@ func (h *ChatHandler) executeTool(ctx context.Context, userID string, tc llm.Too
 			sb.WriteString("\n\n")
 		}
 		return sb.String()
+	case "MemorizeInformation":
+		topic := getStr("topic")
+		content := getStr("content")
+		if topic == "" || content == "" {
+			return "error: topic and content are required"
+		}
+		if h.Memorizer == nil {
+			return "error: memorizer not configured (need Notion knowledge database + Qdrant)"
+		}
+		msg, err := h.Memorizer.MemorizeInformation(ctx, topic, content)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return msg
 	default:
 		return "unknown tool: " + tc.Name
 	}

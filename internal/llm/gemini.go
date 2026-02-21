@@ -9,6 +9,7 @@ import (
 	"google.golang.org/genai"
 )
 
+// Defaults used when env (GEMINI_*) is unset. Chat request defaults (max_tokens, temperature) are in internal/config.
 const (
 	DefaultChatModel       = "gemini-2.5-flash"
 	DefaultEmbeddingModel  = "text-embedding-004"

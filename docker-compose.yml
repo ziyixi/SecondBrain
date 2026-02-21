@@ -1,6 +1,6 @@
 # Example Docker Compose: full stack (Second Brain server + Qdrant).
-# From repo root: docker compose up -d
-# Requires .env with at least GOOGLE_API_KEY (see .env.example).
+# From repo root: make up  or  docker compose up -d --build
+# Requires .env with at least GOOGLE_API_KEY. Set NOTION_KNOWLEDGE_DATABASE_ID + NOTION_TOKEN for MemorizeInformation.
 
 services:
   server:

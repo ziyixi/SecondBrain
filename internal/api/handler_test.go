@@ -47,6 +47,18 @@ func (m *mockWorking) Clear() {
 	m.messages = nil
 }
 
+type mockMemorizer struct {
+	result string
+	err    error
+}
+
+func (m *mockMemorizer) MemorizeInformation(ctx context.Context, topic string, content string) (string, error) {
+	if m.err != nil {
+		return "", m.err
+	}
+	return m.result, nil
+}
+
 func TestHandleChatCompletions_Unit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -56,6 +68,7 @@ func TestHandleChatCompletions_Unit(t *testing.T) {
 		mockGenerate func(ctx context.Context, in llm.GenerateInput) (*llm.GenerateOutput, error)
 		wantStatus   int
 		wantContent  string
+		memorizer    *mockMemorizer
 	}{
 		{
 			name: "simple message",
@@ -72,7 +85,8 @@ func TestHandleChatCompletions_Unit(t *testing.T) {
 			wantContent: "Hi there!",
 		},
 		{
-			name: "empty messages rejected",
+			name:      "empty messages rejected",
+			memorizer: nil,
 			body: ChatCompletionRequest{
 				Model:    "gemini-2.5-flash",
 				Messages: nil,
@@ -104,16 +118,45 @@ func TestHandleChatCompletions_Unit(t *testing.T) {
 			wantStatus:  http.StatusOK,
 			wantContent: "I'll remember that.",
 		},
+		{
+			name: "MemorizeInformation tool",
+			body: ChatCompletionRequest{
+				Model: "gemini-2.5-flash",
+				Messages: []ChatMessage{
+					{Role: "user", Content: "Store this: Go is a programming language."},
+				},
+			},
+			mockGenerate: func(ctx context.Context, in llm.GenerateInput) (*llm.GenerateOutput, error) {
+				if len(in.Messages) == 1 {
+					return &llm.GenerateOutput{
+						Content: "",
+						ToolCalls: []llm.ToolCall{
+							{ID: "1", Name: "MemorizeInformation", Args: map[string]any{"topic": "Programming", "content": "Go is a programming language."}},
+						},
+						FinishReason: "stop",
+					}, nil
+				}
+				return &llm.GenerateOutput{Content: "Stored under Programming.", FinishReason: "stop"}, nil
+			},
+			wantStatus:  http.StatusOK,
+			wantContent: "Stored under Programming.",
+			memorizer:   &mockMemorizer{result: "Created new category page: page-123"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			llmMock := &mockLLM{generateFunc: tt.mockGenerate}
+			var mem Memorizer
+			if tt.memorizer != nil {
+				mem = tt.memorizer
+			}
 			chat := &ChatHandler{
-				LLM:     llmMock,
-				Working: &mockWorking{},
-				Facts:   nil,
-				KB:      nil,
+				LLM:       llmMock,
+				Working:   &mockWorking{},
+				Facts:     nil,
+				KB:        nil,
+				Memorizer: mem,
 			}
 			r := Router(chat)
 

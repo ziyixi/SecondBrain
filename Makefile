@@ -41,7 +41,7 @@ test:
 test-unit:
 	go test -short ./...
 
-# Integration tests only (uses Docker Compose)
+# Integration tests only (uses Docker Compose: Qdrant; runs api + memory Integration tests including Memorizer)
 test-integration:
 	go test -v -run Integration ./internal/api/... ./internal/memory/...
 

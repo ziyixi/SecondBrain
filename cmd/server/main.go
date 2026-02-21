@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/yourusername/secondbrain/internal/api"
+	"github.com/yourusername/secondbrain/internal/config"
 	"github.com/yourusername/secondbrain/internal/llm"
 	"github.com/yourusername/secondbrain/internal/memory"
 )
@@ -26,7 +27,7 @@ func main() {
 	}
 	defer gemini.Close()
 
-	working := memory.NewWorkingMemory(20)
+	working := memory.NewWorkingMemory(config.WorkingMemorySize())
 
 	var facts memory.UserFactStore
 	if os.Getenv("NOTION_TOKEN") != "" && os.Getenv("NOTION_USER_PROFILE_PAGE_ID") != "" {
@@ -37,6 +38,7 @@ func main() {
 	}
 
 	var kb memory.KnowledgeBase
+	var qdrantKB *memory.QdrantKnowledgeBase
 	if os.Getenv("QDRANT_HOST") != "" || os.Getenv("QDRANT_PORT") != "" {
 		embedder := func(ctx context.Context, text string) ([]float32, error) {
 			return gemini.Embed(ctx, text)
@@ -45,17 +47,26 @@ func main() {
 		if os.Getenv("NOTION_TOKEN") != "" {
 			fetcher, _ = memory.NewNotionPageFetcher()
 		}
-		kb, err = memory.NewQdrantKnowledgeBase(embedder, fetcher)
+		qdrantKB, err = memory.NewQdrantKnowledgeBase(embedder, fetcher)
 		if err != nil {
 			log.Printf("Qdrant KB disabled: %v", err)
+		} else {
+			kb = qdrantKB
+			defer qdrantKB.Close()
 		}
 	}
 
+	var memorizer api.Memorizer
+	if notionKnowledge, err := memory.NewNotionKnowledgeStore(); err == nil && qdrantKB != nil {
+		memorizer = memory.NewMemorizerService(qdrantKB, notionKnowledge, config.TopicSimilarityThreshold())
+	}
+
 	chat := &api.ChatHandler{
-		LLM:     gemini,
-		Working: working,
-		Facts:   facts,
-		KB:      kb,
+		LLM:       gemini,
+		Working:   working,
+		Facts:     facts,
+		KB:        kb,
+		Memorizer: memorizer,
 	}
 	r := api.Router(chat)
 

@@ -2,11 +2,14 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -124,5 +127,119 @@ func TestQdrantKnowledgeBase_Integration(t *testing.T) {
 	}
 	if hits[0].Score <= 0 {
 		t.Errorf("expected positive score, got %f", hits[0].Score)
+	}
+}
+
+// fakeNotionWriter is an in-memory NotionKnowledgeWriter + NotionPageFetcher for integration tests (avoids import cycle with test/fakes).
+type fakeNotionWriter struct {
+	mu     sync.Mutex
+	pages  map[string]string
+	nextID int
+}
+
+func newFakeNotionWriter() *fakeNotionWriter {
+	return &fakeNotionWriter{pages: make(map[string]string), nextID: 1}
+}
+
+func (f *fakeNotionWriter) CreatePage(ctx context.Context, title string, content string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := fmt.Sprintf("page-%d", f.nextID)
+	f.nextID++
+	if content != "" {
+		f.pages[id] = title + "\n" + content
+	} else {
+		f.pages[id] = title
+	}
+	return id, nil
+}
+
+func (f *fakeNotionWriter) AppendToPage(ctx context.Context, pageID string, content string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pages[pageID] = f.pages[pageID] + "\n" + content
+	return nil
+}
+
+func (f *fakeNotionWriter) GetPageText(ctx context.Context, pageID string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pages[pageID], nil
+}
+
+func (f *fakeNotionWriter) pageIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ids := make([]string, 0, len(f.pages))
+	for id := range f.pages {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func (f *fakeNotionWriter) getPage(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pages[id]
+}
+
+// TestMemorizer_Integration uses Docker Compose (Qdrant) + in-memory fake Notion to test
+// MemorizeInformation: create new category, then Search returns the stored content.
+func TestMemorizer_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	composeFile := composePath(t)
+	projectName := "secondbrain-memorizer-integration"
+	grpcPort := getFreePort(t)
+	httpPort := getFreePort(t)
+	startCompose(t, composeFile, projectName, grpcPort, httpPort)
+	defer stopCompose(composeFile, projectName)
+
+	os.Setenv("QDRANT_HOST", "127.0.0.1")
+	os.Setenv("QDRANT_PORT", grpcPort)
+	defer os.Unsetenv("QDRANT_HOST")
+	defer os.Unsetenv("QDRANT_PORT")
+
+	ctx := context.Background()
+	fakeNotion := newFakeNotionWriter()
+	embedder := func(ctx context.Context, text string) ([]float32, error) {
+		return []float32{0.1, 0.2, 0.3, 0.4}, nil
+	}
+	kb, err := NewQdrantKnowledgeBase(embedder, fakeNotion)
+	if err != nil {
+		t.Fatalf("NewQdrantKnowledgeBase: %v", err)
+	}
+	defer kb.Close()
+
+	mem := NewMemorizerService(kb, fakeNotion, 0.85)
+	msg, err := mem.MemorizeInformation(ctx, "Go", "Go is a programming language.")
+	if err != nil {
+		t.Fatalf("MemorizeInformation: %v", err)
+	}
+	if !strings.Contains(msg, "Created new category") {
+		t.Errorf("expected message to contain 'Created new category', got %q", msg)
+	}
+	ids := fakeNotion.pageIDs()
+	if len(ids) != 1 {
+		t.Fatalf("expected 1 page, got %d", len(ids))
+	}
+	pageText := fakeNotion.getPage(ids[0])
+	if !strings.Contains(pageText, "Go") || !strings.Contains(pageText, "programming") {
+		t.Errorf("expected page to contain topic and content, got %q", pageText)
+	}
+
+	hits, err := kb.Search(ctx, "programming language", 5)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("expected at least one hit from Search")
+	}
+	if hits[0].Text == "" {
+		t.Error("expected hit text from fetcher (fake Notion)")
+	}
+	if !strings.Contains(hits[0].Text, "Go") {
+		t.Errorf("expected hit to contain 'Go', got %q", hits[0].Text)
 	}
 }

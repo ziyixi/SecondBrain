@@ -1,6 +1,10 @@
 package memory
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/yourusername/secondbrain/internal/config"
+)
 
 // WorkingMemory holds the last N messages of the current conversation.
 type workingMemory struct {
@@ -10,9 +14,10 @@ type workingMemory struct {
 }
 
 // NewWorkingMemory creates a working memory that keeps the last n messages.
+// If n <= 0, uses config (WORKING_MEMORY_SIZE, default 20).
 func NewWorkingMemory(n int) WorkingMemory {
 	if n <= 0 {
-		n = 20
+		n = config.WorkingMemorySize()
 	}
 	return &workingMemory{n: n, entries: make([]struct{ Role, Content string }, 0, n*2)}
 }

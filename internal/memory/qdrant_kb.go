@@ -10,13 +10,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/qdrant/go-client/qdrant"
+	"github.com/yourusername/secondbrain/internal/config"
 )
 
-const (
-	defaultCollection = "knowledge"
-	maxTextChars      = 6000 // ~1500 tokens at ~4 chars/token
-	rrfK              = 60
-)
+const defaultCollection = "knowledge"
 
 // NotionPageFetcher fetches raw text for a Notion page by ID.
 type NotionPageFetcher interface {
@@ -66,6 +63,11 @@ func (q *QdrantKnowledgeBase) Close() error {
 	return q.qc.Close()
 }
 
+// Embed returns the vector for the given text (uses the same embedder as Upsert/Search).
+func (q *QdrantKnowledgeBase) Embed(ctx context.Context, text string) ([]float32, error) {
+	return q.embedder(ctx, text)
+}
+
 func (q *QdrantKnowledgeBase) ensureCollection(ctx context.Context, vectorSize uint64) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -93,10 +95,22 @@ func (q *QdrantKnowledgeBase) ensureCollection(ctx context.Context, vectorSize u
 	return nil
 }
 
+// PointTypeTopic and PointTypeContent distinguish category (topic) vectors from content chunk vectors for dynamic categorization.
+const (
+	PointTypeTopic   = "topic"
+	PointTypeContent = "content"
+)
+
 // Upsert stores in Qdrant only the embedding vector and the Notion page ID.
 // The full knowledge content lives in Notion; Qdrant is a lightweight vector index for retrieval.
 // We use text only to compute the embedding; no document text is stored in Qdrant.
 func (q *QdrantKnowledgeBase) Upsert(ctx context.Context, notionPageID string, text string) error {
+	return q.UpsertPointWithType(ctx, notionPageID, text, PointTypeContent)
+}
+
+// UpsertPointWithType stores a vector + notion_page_id + type (topic or content) in Qdrant.
+// Use type "topic" for category/title embeddings, "content" for chunk embeddings.
+func (q *QdrantKnowledgeBase) UpsertPointWithType(ctx context.Context, notionPageID string, text string, pointType string) error {
 	vec, err := q.embedder(ctx, text)
 	if err != nil {
 		return err
@@ -104,10 +118,7 @@ func (q *QdrantKnowledgeBase) Upsert(ctx context.Context, notionPageID string, t
 	if err := q.ensureCollection(ctx, uint64(len(vec))); err != nil {
 		return err
 	}
-	pointID := notionPageID
-	if _, err := uuid.Parse(notionPageID); err != nil {
-		pointID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(notionPageID)).String()
-	}
+	pointID := uuid.New().String()
 	wait := true
 	_, err = q.qc.Upsert(ctx, &qdrant.UpsertPoints{
 		CollectionName: q.collection,
@@ -118,11 +129,36 @@ func (q *QdrantKnowledgeBase) Upsert(ctx context.Context, notionPageID string, t
 				Vectors: qdrant.NewVectors(vec...),
 				Payload: qdrant.NewValueMap(map[string]any{
 					"notion_page_id": notionPageID,
+					"type":           pointType,
 				}),
 			},
 		},
 	})
 	return err
+}
+
+// FindSimilarTopic runs a vector search restricted to payload type "topic" with a score threshold.
+// Returns the best matching notion_page_id and its score if score >= minScore (e.g. 0.85 for cosine similarity).
+func (q *QdrantKnowledgeBase) FindSimilarTopic(ctx context.Context, topicVec []float32, minScore float32) (notionPageID string, score float32, ok bool) {
+	if err := q.ensureCollection(ctx, uint64(len(topicVec))); err != nil {
+		return "", 0, false
+	}
+	scored, err := q.qc.Query(ctx, &qdrant.QueryPoints{
+		CollectionName: q.collection,
+		Query:          qdrant.NewQuery(topicVec...),
+		Limit:          ptr(uint64(1)),
+		ScoreThreshold: &minScore,
+		Filter: &qdrant.Filter{
+			Must: []*qdrant.Condition{qdrant.NewMatchKeyword("type", PointTypeTopic)},
+		},
+		WithPayload: qdrant.NewWithPayload(true),
+	})
+	if err != nil || len(scored) == 0 {
+		return "", 0, false
+	}
+	sp := scored[0]
+	pageID := valueAsString(sp.Payload, "notion_page_id")
+	return pageID, sp.Score, pageID != ""
 }
 
 // Search runs vector search in Qdrant (vectors + notion_page_id only), then fetches full text from Notion.
@@ -140,8 +176,8 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 		return nil, err
 	}
 	prefetchLimit := limit * 3
-	if prefetchLimit < 20 {
-		prefetchLimit = 20
+	if min := config.KBSearchPrefetchMin(); prefetchLimit < min {
+		prefetchLimit = min
 	}
 	scored, err := q.qc.Query(ctx, &qdrant.QueryPoints{
 		CollectionName: q.collection,
@@ -156,6 +192,7 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 		pageID string
 		rrf    float64
 	}
+	rrfK := config.KBRRFK()
 	byID := make(map[string]*scoredDoc)
 	for rank, sp := range scored {
 		pageID := valueAsString(sp.Payload, "notion_page_id")
@@ -181,7 +218,7 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 		if q.fetcher != nil {
 			full, err := q.fetcher.GetPageText(ctx, d.pageID)
 			if err == nil && full != "" {
-				text = truncateText(full, maxTextChars)
+				text = truncateText(full, config.KBMaxTextChars())
 			}
 		}
 		out = append(out, DocumentHit{NotionPageID: d.pageID, Text: text, Score: d.rrf})

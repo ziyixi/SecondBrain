@@ -4,6 +4,7 @@ package fakes
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/yourusername/secondbrain/internal/llm"
@@ -101,9 +102,70 @@ func (m *InMemoryPageFetcher) GetPageText(ctx context.Context, pageID string) (s
 	return m.pages[pageID], nil
 }
 
+// FakeNotionKnowledgeStore implements memory.NotionKnowledgeWriter for tests (in-memory pages).
+type FakeNotionKnowledgeStore struct {
+	mu     sync.Mutex
+	pages  map[string]string // pageID -> "title\ncontent" or full text
+	nextID int
+}
+
+// NewFakeNotionKnowledgeStore creates a fake that stores pages in memory.
+func NewFakeNotionKnowledgeStore() *FakeNotionKnowledgeStore {
+	return &FakeNotionKnowledgeStore{pages: make(map[string]string), nextID: 1}
+}
+
+// CreatePage creates a fake page; returns a generated page ID (e.g. "page-1").
+func (f *FakeNotionKnowledgeStore) CreatePage(ctx context.Context, title string, content string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := fmt.Sprintf("page-%d", f.nextID)
+	f.nextID++
+	if content != "" {
+		f.pages[id] = title + "\n" + content
+	} else {
+		f.pages[id] = title
+	}
+	return id, nil
+}
+
+// AppendToPage appends content to an existing fake page.
+func (f *FakeNotionKnowledgeStore) AppendToPage(ctx context.Context, pageID string, content string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pages[pageID] = f.pages[pageID] + "\n" + content
+	return nil
+}
+
+// GetPage returns the stored text for a page (for assertions).
+func (f *FakeNotionKnowledgeStore) GetPage(pageID string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pages[pageID]
+}
+
+// PageIDs returns all page IDs (for assertions).
+func (f *FakeNotionKnowledgeStore) PageIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ids := make([]string, 0, len(f.pages))
+	for id := range f.pages {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// GetPageText implements memory.NotionPageFetcher so the same fake can be used as fetcher for Search.
+func (f *FakeNotionKnowledgeStore) GetPageText(ctx context.Context, pageID string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pages[pageID], nil
+}
+
 // Ensure compile-time interface satisfaction.
 var (
-	_ llm.Client               = (*ScriptedLLM)(nil)
-	_ memory.UserFactStore     = (*InMemoryFactStore)(nil)
-	_ memory.NotionPageFetcher = (*InMemoryPageFetcher)(nil)
+	_ llm.Client                   = (*ScriptedLLM)(nil)
+	_ memory.UserFactStore         = (*InMemoryFactStore)(nil)
+	_ memory.NotionPageFetcher     = (*InMemoryPageFetcher)(nil)
+	_ memory.NotionKnowledgeWriter = (*FakeNotionKnowledgeStore)(nil)
+	_ memory.NotionPageFetcher     = (*FakeNotionKnowledgeStore)(nil)
 )
