@@ -1,0 +1,24 @@
+# Local env (secrets)
+.env
+
+# Binaries
+/server
+/secondbrain
+*.exe
+
+# Go
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,13 @@
+# Docker Compose stack for integration tests (Qdrant + any future services).
+# Host port can be set via QDRANT_HOST_PORT (default 6334) to avoid conflicts.
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.11.4
+    ports:
+      - "${QDRANT_HOST_PORT:-6334}:6334"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:6334/readyz"]
+      interval: 2s
+      timeout: 5s
+      retries: 10

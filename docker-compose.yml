@@ -1,0 +1,34 @@
+# Example Docker Compose: full stack (Second Brain server + Qdrant).
+# From repo root: docker compose up -d
+# Requires .env with at least GOOGLE_API_KEY (see .env.example).
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: llm/Dockerfile
+    image: secondbrain:latest
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      PORT: "8080"
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6334"
+    env_file:
+      - .env
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.11.4
+    ports:
+      - "6334:6334"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:6334/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
