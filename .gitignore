@@ -4,6 +4,8 @@
 # Binaries
 /server
 /secondbrain
+/integration-server
+integration-server
 *.exe
 
 # Go
