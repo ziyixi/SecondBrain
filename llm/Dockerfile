@@ -12,6 +12,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o server ./cmd/server
 
 # Stage 2: minimal runtime
 FROM alpine:3.19
+LABEL org.opencontainers.image.description="OpenAI-compatible chat API with agentic memory: user facts and knowledge in Notion, vector search via Qdrant, LLM via Gemini."
 RUN apk --no-cache add ca-certificates
 WORKDIR /app
 ENV PORT=8080
