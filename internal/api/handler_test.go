@@ -10,9 +10,15 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/yourusername/secondbrain/internal/config"
 	"github.com/yourusername/secondbrain/internal/llm"
 	"github.com/yourusername/secondbrain/internal/memory"
 )
+
+// testConfig returns a config for handler tests (uses Load() so env can override).
+func testConfig() *config.Config {
+	return config.Load()
+}
 
 // Mock LLM client
 type mockLLM struct {
@@ -154,6 +160,7 @@ func TestHandleChatCompletions_Unit(t *testing.T) {
 				mem = tt.memorizer
 			}
 			chat := &ChatHandler{
+				Config:    testConfig(),
 				LLM:       llmMock,
 				Working:   &mockWorking{},
 				Facts:     nil,
@@ -224,6 +231,7 @@ func TestHandleChatCompletions_SearchKnowledgeBaseError(t *testing.T) {
 		},
 	}
 	chat := &ChatHandler{
+		Config:  testConfig(),
 		LLM:     llmMock,
 		Working: &mockWorking{},
 		KB:      &mockKB{searchErr: kbErr},
@@ -270,6 +278,7 @@ func TestHandleChatCompletions_UnknownTool(t *testing.T) {
 		},
 	}
 	chat := &ChatHandler{
+		Config:  testConfig(),
 		LLM:     llmMock,
 		Working: &mockWorking{},
 	}
@@ -314,6 +323,7 @@ func TestHandleChatCompletions_UpsertUserFactEmptyFact(t *testing.T) {
 		},
 	}
 	chat := &ChatHandler{
+		Config:  testConfig(),
 		LLM:     llmMock,
 		Working: &mockWorking{},
 		Facts:   &mockFacts{},
@@ -352,7 +362,7 @@ func (m *mockFacts) AppendFact(ctx context.Context, userID string, fact string) 
 }
 
 func TestOpenAIMessagesToLLM(t *testing.T) {
-	h := &ChatHandler{}
+	h := &ChatHandler{Config: testConfig()}
 	msgs := h.openAIMessagesToLLM([]ChatMessage{
 		{Role: "system", Content: "You are helpful."},
 		{Role: "user", Content: "Hi"},
@@ -371,7 +381,7 @@ func TestOpenAIMessagesToLLM(t *testing.T) {
 
 func TestRouter_Health(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	r := Router(&ChatHandler{})
+	r := Router(&ChatHandler{Config: testConfig()})
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)

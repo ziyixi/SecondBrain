@@ -3,8 +3,9 @@ package memory
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
+
+	"github.com/yourusername/secondbrain/internal/config"
 )
 
 const defaultUserID = "default"
@@ -16,21 +17,17 @@ type NotionUserFactStore struct {
 	defaultUID string
 }
 
-// NewNotionUserFactStore creates a Notion-backed user fact store.
-// Auth: internal integration token (NOTION_TOKEN) per https://developers.notion.com/docs/authorization#internal-integration-auth-flow-set-up.
-// NOTION_USER_PROFILE_PAGE_ID is the page ID; the page must be shared with the integration (Add connections).
-func NewNotionUserFactStore() (*NotionUserFactStore, error) {
-	token := os.Getenv("NOTION_TOKEN")
-	if token == "" {
+// NewNotionUserFactStore creates a Notion-backed user fact store from the central config.
+func NewNotionUserFactStore(cfg *config.Config) (*NotionUserFactStore, error) {
+	if cfg.NotionToken == "" {
 		return nil, fmt.Errorf("NOTION_TOKEN is required")
 	}
-	profileID := os.Getenv("NOTION_USER_PROFILE_PAGE_ID")
-	if profileID == "" {
+	if cfg.NotionUserProfilePageID == "" {
 		return nil, fmt.Errorf("NOTION_USER_PROFILE_PAGE_ID is required")
 	}
 	return &NotionUserFactStore{
-		client:     newNotionClient(token),
-		profileID:  strings.TrimSpace(profileID),
+		client:     newNotionClient(cfg.NotionToken),
+		profileID:  cfg.NotionUserProfilePageID,
 		defaultUID: defaultUserID,
 	}, nil
 }
@@ -68,13 +65,12 @@ type NotionPageFetcherImpl struct {
 	client *notionClient
 }
 
-// NewNotionPageFetcher creates a fetcher using NOTION_TOKEN (internal integration; see Notion authorization docs).
-func NewNotionPageFetcher() (*NotionPageFetcherImpl, error) {
-	token := os.Getenv("NOTION_TOKEN")
-	if token == "" {
+// NewNotionPageFetcher creates a fetcher from the central config.
+func NewNotionPageFetcher(cfg *config.Config) (*NotionPageFetcherImpl, error) {
+	if cfg.NotionToken == "" {
 		return nil, fmt.Errorf("NOTION_TOKEN is required")
 	}
-	return &NotionPageFetcherImpl{client: newNotionClient(token)}, nil
+	return &NotionPageFetcherImpl{client: newNotionClient(cfg.NotionToken)}, nil
 }
 
 // GetPageText returns the plain text of a Notion page (block children).

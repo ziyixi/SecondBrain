@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yourusername/secondbrain/internal/config"
 	"github.com/yourusername/secondbrain/internal/llm"
 	"github.com/yourusername/secondbrain/internal/memory"
 	"github.com/yourusername/secondbrain/test/fakes"
@@ -139,10 +140,11 @@ func TestIntegration_MemorySearchAndGoal(t *testing.T) {
 	defer os.Unsetenv("QDRANT_PORT")
 
 	ctx := context.Background()
+	cfg := config.Load()
 	embedder := func(ctx context.Context, text string) ([]float32, error) {
 		return []float32{0.1, 0.2, 0.3, 0.4}, nil
 	}
-	kb, err := memory.NewQdrantKnowledgeBase(embedder, nil)
+	kb, err := memory.NewQdrantKnowledgeBase(embedder, nil, cfg)
 	if err != nil {
 		t.Fatalf("NewQdrantKnowledgeBase: %v", err)
 	}
@@ -229,9 +231,12 @@ func TestIntegration_UpsertFactAndRecall(t *testing.T) {
 		},
 	)
 
+	cfg := config.Load()
+	cfg.WorkingMemorySize = 20
 	chat := &ChatHandler{
+		Config:  cfg,
 		LLM:     scriptedLLM,
-		Working: memory.NewWorkingMemory(20),
+		Working: memory.NewWorkingMemory(cfg.WorkingMemorySize),
 		Facts:   factStore,
 		KB:      nil,
 	}

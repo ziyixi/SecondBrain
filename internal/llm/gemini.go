@@ -3,18 +3,10 @@ package llm
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
+	"github.com/yourusername/secondbrain/internal/config"
 	"google.golang.org/genai"
-)
-
-// Defaults used when env (GEMINI_*) is unset. Chat request defaults (max_tokens, temperature) are in internal/config.
-const (
-	DefaultChatModel       = "gemini-2.5-flash"
-	DefaultEmbeddingModel  = "text-embedding-004"
-	DefaultMaxOutputTokens = 2048
-	DefaultTemperature     = 0.7
 )
 
 // GeminiClient implements llm.Client using Google Gemini API.
@@ -26,54 +18,24 @@ type GeminiClient struct {
 	temp       float32
 }
 
-// NewGeminiClient creates a Gemini client from environment variables.
-// GEMINI_CHAT_MODEL, GEMINI_EMBEDDING_MODEL, GOOGLE_API_KEY.
-func NewGeminiClient(ctx context.Context) (*GeminiClient, error) {
-	apiKey := os.Getenv("GOOGLE_API_KEY")
-	if apiKey == "" {
+// NewGeminiClient creates a Gemini client from the central config.
+func NewGeminiClient(ctx context.Context, cfg *config.Config) (*GeminiClient, error) {
+	if cfg.GoogleAPIKey == "" {
 		return nil, fmt.Errorf("GOOGLE_API_KEY is required")
 	}
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  apiKey,
+		APIKey:  cfg.GoogleAPIKey,
 		Backend: genai.BackendGeminiAPI,
 	})
 	if err != nil {
 		return nil, err
 	}
-	chatModel := os.Getenv("GEMINI_CHAT_MODEL")
-	if chatModel == "" {
-		chatModel = DefaultChatModel
-	}
-	embedModel := os.Getenv("GEMINI_EMBEDDING_MODEL")
-	if embedModel == "" {
-		embedModel = DefaultEmbeddingModel
-	}
-	maxTokens := DefaultMaxOutputTokens
-	if n := os.Getenv("GEMINI_MAX_OUTPUT_TOKENS"); n != "" {
-		var v int
-		if _, err := fmt.Sscanf(n, "%d", &v); err == nil && v > 0 {
-			maxTokens = v
-		}
-	}
-	var temp float32 = DefaultTemperature
-	if t := os.Getenv("GEMINI_TEMPERATURE"); t != "" {
-		var f float64
-		if _, err := fmt.Sscanf(t, "%f", &f); err == nil {
-			if f < 0 {
-				f = 0
-			}
-			if f > 2 {
-				f = 2
-			}
-			temp = float32(f)
-		}
-	}
 	gc := &GeminiClient{
 		client:     client,
-		chatModel:  chatModel,
-		embedModel: embedModel,
-		maxTokens:  maxTokens,
-		temp:       temp,
+		chatModel:  cfg.GeminiChatModel,
+		embedModel: cfg.GeminiEmbedModel,
+		maxTokens:  cfg.GeminiMaxTokens,
+		temp:       cfg.GeminiTemperature,
 	}
 	return gc, nil
 }

@@ -5,82 +5,107 @@ import (
 	"testing"
 )
 
-func TestDefaults(t *testing.T) {
-	// Clear env for default tests
-	keys := []string{
-		"MEMORIZE_TOPIC_SIMILARITY_THRESHOLD", "WORKING_MEMORY_SIZE", "CHAT_TOOL_LOOP_MAX_ITER",
-		"CHAT_DEFAULT_MAX_TOKENS", "CHAT_DEFAULT_TEMPERATURE", "GEMINI_MAX_OUTPUT_TOKENS", "GEMINI_TEMPERATURE",
-		"KB_MAX_TEXT_CHARS", "KB_RRF_K", "KB_SEARCH_PREFETCH_MIN",
-	}
-	for _, k := range keys {
+// keys that Load() reads; unset for default tests
+var loadEnvKeys = []string{
+	"PORT", "GOOGLE_API_KEY",
+	"GEMINI_CHAT_MODEL", "GEMINI_EMBEDDING_MODEL", "GEMINI_MAX_OUTPUT_TOKENS", "GEMINI_TEMPERATURE",
+	"NOTION_TOKEN", "NOTION_USER_PROFILE_PAGE_ID", "NOTION_KNOWLEDGE_DATABASE_ID", "NOTION_KNOWLEDGE_TITLE_PROPERTY",
+	"QDRANT_HOST", "QDRANT_PORT", "QDRANT_COLLECTION",
+	"MEMORIZE_TOPIC_SIMILARITY_THRESHOLD", "WORKING_MEMORY_SIZE", "CHAT_TOOL_LOOP_MAX_ITER",
+	"CHAT_DEFAULT_MAX_TOKENS", "CHAT_DEFAULT_TEMPERATURE",
+	"KB_MAX_TEXT_CHARS", "KB_RRF_K", "KB_SEARCH_PREFETCH_MIN",
+}
+
+func unsetLoadKeys() {
+	for _, k := range loadEnvKeys {
 		os.Unsetenv(k)
 	}
-	defer func() {
-		for _, k := range keys {
-			os.Unsetenv(k)
-		}
-	}()
+}
 
-	if v := TopicSimilarityThreshold(); v != DefaultTopicSimilarityThreshold {
-		t.Errorf("TopicSimilarityThreshold() = %v, want %v", v, DefaultTopicSimilarityThreshold)
+func TestLoad_Defaults(t *testing.T) {
+	unsetLoadKeys()
+	defer unsetLoadKeys()
+
+	cfg := Load()
+
+	if cfg.Port != DefaultPort {
+		t.Errorf("Port = %q, want %q", cfg.Port, DefaultPort)
 	}
-	if v := WorkingMemorySize(); v != DefaultWorkingMemorySize {
-		t.Errorf("WorkingMemorySize() = %v, want %v", v, DefaultWorkingMemorySize)
+	if cfg.TopicSimilarityThreshold != DefaultTopicSimilarityThreshold {
+		t.Errorf("TopicSimilarityThreshold = %v, want %v", cfg.TopicSimilarityThreshold, DefaultTopicSimilarityThreshold)
 	}
-	if v := ChatToolLoopMaxIter(); v != DefaultChatToolLoopMaxIter {
-		t.Errorf("ChatToolLoopMaxIter() = %v, want %v", v, DefaultChatToolLoopMaxIter)
+	if cfg.WorkingMemorySize != DefaultWorkingMemorySize {
+		t.Errorf("WorkingMemorySize = %v, want %v", cfg.WorkingMemorySize, DefaultWorkingMemorySize)
 	}
-	if v := DefaultMaxTokens(); v != DefaultMaxTokensVal {
-		t.Errorf("DefaultMaxTokens() = %v, want %v", v, DefaultMaxTokensVal)
+	if cfg.ChatToolLoopMaxIter != DefaultChatToolLoopMaxIter {
+		t.Errorf("ChatToolLoopMaxIter = %v, want %v", cfg.ChatToolLoopMaxIter, DefaultChatToolLoopMaxIter)
 	}
-	if v := DefaultTemperature(); v != DefaultTemperatureVal {
-		t.Errorf("DefaultTemperature() = %v, want %v", v, DefaultTemperatureVal)
+	if cfg.DefaultMaxTokens != DefaultMaxTokensVal {
+		t.Errorf("DefaultMaxTokens = %v, want %v", cfg.DefaultMaxTokens, DefaultMaxTokensVal)
 	}
-	if v := KBMaxTextChars(); v != DefaultKBMaxTextChars {
-		t.Errorf("KBMaxTextChars() = %v, want %v", v, DefaultKBMaxTextChars)
+	if cfg.DefaultTemperature != DefaultTemperatureVal {
+		t.Errorf("DefaultTemperature = %v, want %v", cfg.DefaultTemperature, DefaultTemperatureVal)
 	}
-	if v := KBRRFK(); v != DefaultKBRRFK {
-		t.Errorf("KBRRFK() = %v, want %v", v, DefaultKBRRFK)
+	if cfg.KBMaxTextChars != DefaultKBMaxTextChars {
+		t.Errorf("KBMaxTextChars = %v, want %v", cfg.KBMaxTextChars, DefaultKBMaxTextChars)
 	}
-	if v := KBSearchPrefetchMin(); v != DefaultKBSearchPrefetchMin {
-		t.Errorf("KBSearchPrefetchMin() = %v, want %v", v, DefaultKBSearchPrefetchMin)
+	if cfg.KBRRFK != DefaultKBRRFK {
+		t.Errorf("KBRRFK = %v, want %v", cfg.KBRRFK, DefaultKBRRFK)
+	}
+	if cfg.KBSearchPrefetchMin != DefaultKBSearchPrefetchMin {
+		t.Errorf("KBSearchPrefetchMin = %v, want %v", cfg.KBSearchPrefetchMin, DefaultKBSearchPrefetchMin)
+	}
+	if cfg.QdrantHost != "" || cfg.QdrantPort != 0 {
+		t.Errorf("Qdrant (unset env) should be empty/0, got host=%q port=%d", cfg.QdrantHost, cfg.QdrantPort)
+	}
+	if cfg.QdrantCollection != DefaultQdrantCollection {
+		t.Errorf("QdrantCollection = %q, want %q", cfg.QdrantCollection, DefaultQdrantCollection)
 	}
 }
 
-func TestEnvOverride(t *testing.T) {
+func TestLoad_EnvOverride(t *testing.T) {
 	os.Setenv("MEMORIZE_TOPIC_SIMILARITY_THRESHOLD", "0.9")
 	os.Setenv("WORKING_MEMORY_SIZE", "50")
-	defer os.Unsetenv("MEMORIZE_TOPIC_SIMILARITY_THRESHOLD")
-	defer os.Unsetenv("WORKING_MEMORY_SIZE")
+	os.Setenv("PORT", "9000")
+	defer unsetLoadKeys()
 
-	if v := TopicSimilarityThreshold(); v != 0.9 {
-		t.Errorf("TopicSimilarityThreshold() = %v, want 0.9", v)
+	cfg := Load()
+
+	if cfg.TopicSimilarityThreshold != 0.9 {
+		t.Errorf("TopicSimilarityThreshold = %v, want 0.9", cfg.TopicSimilarityThreshold)
 	}
-	if v := WorkingMemorySize(); v != 50 {
-		t.Errorf("WorkingMemorySize() = %v, want 50", v)
+	if cfg.WorkingMemorySize != 50 {
+		t.Errorf("WorkingMemorySize = %v, want 50", cfg.WorkingMemorySize)
+	}
+	if cfg.Port != "9000" {
+		t.Errorf("Port = %q, want 9000", cfg.Port)
 	}
 }
 
-func TestDefaultTemperature_Clamping(t *testing.T) {
-	os.Unsetenv("CHAT_DEFAULT_TEMPERATURE")
-	defer os.Unsetenv("GEMINI_TEMPERATURE")
+func TestLoad_DefaultTemperatureClamping(t *testing.T) {
+	unsetLoadKeys()
+	defer unsetLoadKeys()
 
 	os.Setenv("GEMINI_TEMPERATURE", "3")
-	if v := DefaultTemperature(); v != 2 {
-		t.Errorf("GEMINI_TEMPERATURE=3 should clamp to 2, got %v", v)
+	cfg := Load()
+	if cfg.DefaultTemperature != 2 {
+		t.Errorf("GEMINI_TEMPERATURE=3 should clamp to 2, got %v", cfg.DefaultTemperature)
 	}
 
+	os.Unsetenv("GEMINI_TEMPERATURE")
 	os.Setenv("GEMINI_TEMPERATURE", "-0.5")
-	if v := DefaultTemperature(); v != 0 {
-		t.Errorf("GEMINI_TEMPERATURE=-0.5 should clamp to 0, got %v", v)
+	cfg = Load()
+	if cfg.DefaultTemperature != 0 {
+		t.Errorf("GEMINI_TEMPERATURE=-0.5 should clamp to 0, got %v", cfg.DefaultTemperature)
 	}
 }
 
-func TestEnvOverride_InvalidValues(t *testing.T) {
+func TestLoad_InvalidValues(t *testing.T) {
 	os.Setenv("WORKING_MEMORY_SIZE", "invalid")
 	defer os.Unsetenv("WORKING_MEMORY_SIZE")
 
-	if v := WorkingMemorySize(); v != DefaultWorkingMemorySize {
-		t.Errorf("invalid WORKING_MEMORY_SIZE should use default %d, got %d", DefaultWorkingMemorySize, v)
+	cfg := Load()
+	if cfg.WorkingMemorySize != DefaultWorkingMemorySize {
+		t.Errorf("invalid WORKING_MEMORY_SIZE should use default %d, got %d", DefaultWorkingMemorySize, cfg.WorkingMemorySize)
 	}
 }

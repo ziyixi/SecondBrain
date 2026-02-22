@@ -8,7 +8,6 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/yourusername/secondbrain/internal/api"
 	"github.com/yourusername/secondbrain/internal/config"
@@ -18,10 +17,7 @@ import (
 )
 
 func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	cfg := config.Load()
 
 	// Scripted LLM: first response = SearchKnowledgeBase("golang"), second = final answer (matches TestIntegration_MemorySearchAndGoal).
 	scriptedLLM := fakes.NewScriptedLLM(
@@ -38,15 +34,15 @@ func main() {
 		},
 	)
 
-	working := memory.NewWorkingMemory(config.WorkingMemorySize())
+	working := memory.NewWorkingMemory(cfg.WorkingMemorySize)
 	facts := fakes.NewInMemoryFactStore()
 
 	var kb memory.KnowledgeBase
-	if os.Getenv("QDRANT_HOST") != "" || os.Getenv("QDRANT_PORT") != "" {
+	if cfg.QdrantHost != "" || cfg.QdrantPort > 0 {
 		embedder := func(ctx context.Context, text string) ([]float32, error) {
 			return []float32{0.1, 0.2, 0.3, 0.4}, nil
 		}
-		qdrantKB, err := memory.NewQdrantKnowledgeBase(embedder, nil)
+		qdrantKB, err := memory.NewQdrantKnowledgeBase(embedder, nil, cfg)
 		if err != nil {
 			log.Fatalf("NewQdrantKnowledgeBase: %v", err)
 		}
@@ -55,6 +51,7 @@ func main() {
 	}
 
 	chat := &api.ChatHandler{
+		Config:  cfg,
 		LLM:     scriptedLLM,
 		Working: working,
 		Facts:   facts,
@@ -62,8 +59,8 @@ func main() {
 	}
 	r := api.Router(chat)
 
-	srv := &http.Server{Addr: ":" + port, Handler: r}
-	log.Printf("integration-server listening on :%s (fakes + Qdrant)", port)
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
+	log.Printf("integration-server listening on :%s (fakes + Qdrant)", cfg.Port)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("ListenAndServe: %v", err)
 	}

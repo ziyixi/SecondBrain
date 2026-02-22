@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/yourusername/secondbrain/internal/config"
 )
 
 // composePath returns the path to test/integration/docker-compose.yml (run from repo root or package dir).
@@ -100,11 +102,12 @@ func TestQdrantKnowledgeBase_Integration(t *testing.T) {
 	defer os.Unsetenv("QDRANT_PORT")
 
 	ctx := context.Background()
+	cfg := config.Load()
 
 	embedder := func(ctx context.Context, text string) ([]float32, error) {
 		return []float32{0.1, 0.2, 0.3, 0.4}, nil
 	}
-	kb, err := NewQdrantKnowledgeBase(embedder, nil)
+	kb, err := NewQdrantKnowledgeBase(embedder, nil, cfg)
 	if err != nil {
 		t.Fatalf("NewQdrantKnowledgeBase: %v", err)
 	}
@@ -202,17 +205,18 @@ func TestMemorizer_Integration(t *testing.T) {
 	defer os.Unsetenv("QDRANT_PORT")
 
 	ctx := context.Background()
+	cfg := config.Load()
 	fakeNotion := newFakeNotionWriter()
 	embedder := func(ctx context.Context, text string) ([]float32, error) {
 		return []float32{0.1, 0.2, 0.3, 0.4}, nil
 	}
-	kb, err := NewQdrantKnowledgeBase(embedder, fakeNotion)
+	kb, err := NewQdrantKnowledgeBase(embedder, fakeNotion, cfg)
 	if err != nil {
 		t.Fatalf("NewQdrantKnowledgeBase: %v", err)
 	}
 	defer kb.Close()
 
-	mem := NewMemorizerService(kb, fakeNotion, 0.85)
+	mem := NewMemorizerService(kb, fakeNotion, 0.85, cfg)
 	msg, err := mem.MemorizeInformation(ctx, "Go", "Go is a programming language.")
 	if err != nil {
 		t.Fatalf("MemorizeInformation: %v", err)

@@ -3,10 +3,8 @@ package memory
 import (
 	"context"
 	"fmt"
-	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -14,8 +12,6 @@ import (
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/yourusername/secondbrain/internal/config"
 )
-
-const defaultCollection = "knowledge"
 
 // NotionPageFetcher fetches raw text for a Notion page by ID.
 type NotionPageFetcher interface {
@@ -28,27 +24,25 @@ type QdrantKnowledgeBase struct {
 	collection  string
 	embedder    func(ctx context.Context, text string) ([]float32, error)
 	fetcher     NotionPageFetcher
+	cfg         *config.Config
 	vectorSize  uint64
 	mu          sync.Mutex
 	initialized bool
 }
 
-// NewQdrantKnowledgeBase creates a knowledge base backed by Qdrant.
-// QDRANT_HOST, QDRANT_PORT (default 6334), QDRANT_COLLECTION (default "knowledge") from env.
-func NewQdrantKnowledgeBase(embedder func(ctx context.Context, text string) ([]float32, error), fetcher NotionPageFetcher) (*QdrantKnowledgeBase, error) {
-	host := os.Getenv("QDRANT_HOST")
+// NewQdrantKnowledgeBase creates a knowledge base backed by Qdrant using the central config.
+func NewQdrantKnowledgeBase(embedder func(ctx context.Context, text string) ([]float32, error), fetcher NotionPageFetcher, cfg *config.Config) (*QdrantKnowledgeBase, error) {
+	host := cfg.QdrantHost
 	if host == "" {
-		host = "localhost"
+		host = config.DefaultQdrantHost
 	}
-	port := 6334
-	if p := os.Getenv("QDRANT_PORT"); p != "" {
-		if n, err := strconv.Atoi(p); err == nil && n > 0 {
-			port = n
-		}
+	port := cfg.QdrantPort
+	if port <= 0 {
+		port = config.DefaultQdrantPort
 	}
-	collection := os.Getenv("QDRANT_COLLECTION")
+	collection := cfg.QdrantCollection
 	if collection == "" {
-		collection = defaultCollection
+		collection = config.DefaultQdrantCollection
 	}
 	client, err := qdrant.NewClient(&qdrant.Config{Host: host, Port: port})
 	if err != nil {
@@ -59,6 +53,7 @@ func NewQdrantKnowledgeBase(embedder func(ctx context.Context, text string) ([]f
 		collection: collection,
 		embedder:   embedder,
 		fetcher:    fetcher,
+		cfg:        cfg,
 	}, nil
 }
 
@@ -180,7 +175,7 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 		return nil, err
 	}
 	prefetchLimit := limit * 3
-	if min := config.KBSearchPrefetchMin(); prefetchLimit < min {
+	if min := q.cfg.KBSearchPrefetchMin; prefetchLimit < min {
 		prefetchLimit = min
 	}
 	scored, err := q.qc.Query(ctx, &qdrant.QueryPoints{
@@ -196,7 +191,7 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 		pageID string
 		rrf    float64
 	}
-	rrfK := config.KBRRFK()
+	rrfK := q.cfg.KBRRFK
 	byID := make(map[string]*scoredDoc)
 	for rank, sp := range scored {
 		pageID := valueAsString(sp.Payload, "notion_page_id")
@@ -222,7 +217,7 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 		if q.fetcher != nil {
 			full, err := q.fetcher.GetPageText(ctx, d.pageID)
 			if err == nil && full != "" {
-				text = truncateText(full, config.KBMaxTextChars())
+				text = truncateText(full, q.cfg.KBMaxTextChars)
 			}
 		}
 		out = append(out, DocumentHit{NotionPageID: d.pageID, Text: text, Score: d.rrf})

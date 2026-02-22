@@ -15,23 +15,20 @@ import (
 )
 
 func main() {
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	cfg := config.Load()
 
 	ctx := context.Background()
-	gemini, err := llm.NewGeminiClient(ctx)
+	gemini, err := llm.NewGeminiClient(ctx, cfg)
 	if err != nil {
 		log.Fatalf("NewGeminiClient: %v", err)
 	}
 	defer gemini.Close()
 
-	working := memory.NewWorkingMemory(config.WorkingMemorySize())
+	working := memory.NewWorkingMemory(cfg.WorkingMemorySize)
 
 	var facts memory.UserFactStore
-	if os.Getenv("NOTION_TOKEN") != "" && os.Getenv("NOTION_USER_PROFILE_PAGE_ID") != "" {
-		facts, err = memory.NewNotionUserFactStore()
+	if cfg.NotionToken != "" && cfg.NotionUserProfilePageID != "" {
+		facts, err = memory.NewNotionUserFactStore(cfg)
 		if err != nil {
 			log.Printf("Notion fact store disabled: %v", err)
 		}
@@ -39,15 +36,15 @@ func main() {
 
 	var kb memory.KnowledgeBase
 	var qdrantKB *memory.QdrantKnowledgeBase
-	if os.Getenv("QDRANT_HOST") != "" || os.Getenv("QDRANT_PORT") != "" {
+	if cfg.QdrantHost != "" || cfg.QdrantPort > 0 {
 		embedder := func(ctx context.Context, text string) ([]float32, error) {
 			return gemini.Embed(ctx, text)
 		}
 		var fetcher memory.NotionPageFetcher
-		if os.Getenv("NOTION_TOKEN") != "" {
-			fetcher, _ = memory.NewNotionPageFetcher()
+		if cfg.NotionToken != "" {
+			fetcher, _ = memory.NewNotionPageFetcher(cfg)
 		}
-		qdrantKB, err = memory.NewQdrantKnowledgeBase(embedder, fetcher)
+		qdrantKB, err = memory.NewQdrantKnowledgeBase(embedder, fetcher, cfg)
 		if err != nil {
 			log.Printf("Qdrant KB disabled: %v", err)
 		} else {
@@ -57,11 +54,12 @@ func main() {
 	}
 
 	var memorizer api.Memorizer
-	if notionKnowledge, err := memory.NewNotionKnowledgeStore(); err == nil && qdrantKB != nil {
-		memorizer = memory.NewMemorizerService(qdrantKB, notionKnowledge, config.TopicSimilarityThreshold())
+	if notionKnowledge, err := memory.NewNotionKnowledgeStore(cfg); err == nil && qdrantKB != nil {
+		memorizer = memory.NewMemorizerService(qdrantKB, notionKnowledge, cfg.TopicSimilarityThreshold, cfg)
 	}
 
 	chat := &api.ChatHandler{
+		Config:    cfg,
 		LLM:       gemini,
 		Working:   working,
 		Facts:     facts,
@@ -70,14 +68,14 @@ func main() {
 	}
 	r := api.Router(chat)
 
-	srv := &http.Server{Addr: ":" + port, Handler: r}
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("ListenAndServe: %v", err)
 		}
 	}()
 
-	log.Printf("Listening on :%s", port)
+	log.Printf("Listening on :%s", cfg.Port)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

@@ -29,10 +29,13 @@ type MemorizerService struct {
 }
 
 // NewMemorizerService creates a memorizer that uses the given Qdrant KB and Notion knowledge writer.
-// Topic similarity threshold: pass 0 to use config (MEMORIZE_TOPIC_SIMILARITY_THRESHOLD, default 0.85).
-func NewMemorizerService(kb *QdrantKnowledgeBase, notion NotionKnowledgeWriter, topicThreshold float32) *MemorizerService {
+// Topic similarity threshold: pass 0 to use the value from cfg (MEMORIZE_TOPIC_SIMILARITY_THRESHOLD, default 0.85).
+func NewMemorizerService(kb *QdrantKnowledgeBase, notion NotionKnowledgeWriter, topicThreshold float32, cfg *config.Config) *MemorizerService {
+	if topicThreshold <= 0 && cfg != nil {
+		topicThreshold = cfg.TopicSimilarityThreshold
+	}
 	if topicThreshold <= 0 {
-		topicThreshold = config.TopicSimilarityThreshold()
+		topicThreshold = config.DefaultTopicSimilarityThreshold
 	}
 	return &MemorizerService{kb: kb, notion: notion, threshold: topicThreshold}
 }

@@ -21,6 +21,7 @@ type Memorizer interface {
 
 // ChatHandler handles POST /v1/chat/completions with LLM and memory.
 type ChatHandler struct {
+	Config    *config.Config
 	LLM       llm.Client
 	Working   memory.WorkingMemory
 	Facts     memory.UserFactStore
@@ -71,11 +72,11 @@ func (h *ChatHandler) HandleChatCompletions(c *gin.Context) {
 	}
 
 	tools := h.buildTools()
-	maxTokens := config.DefaultMaxTokens()
+	maxTokens := h.Config.DefaultMaxTokens
 	if req.MaxTokens != nil {
 		maxTokens = *req.MaxTokens
 	}
-	temp := config.DefaultTemperature()
+	temp := h.Config.DefaultTemperature
 	if req.Temperature != nil {
 		temp = *req.Temperature
 	}
@@ -91,7 +92,7 @@ func (h *ChatHandler) HandleChatCompletions(c *gin.Context) {
 	}
 
 	var lastContent string
-	for iter := 0; iter < config.ChatToolLoopMaxIter(); iter++ {
+	for iter := 0; iter < h.Config.ChatToolLoopMaxIter; iter++ {
 		out, err := h.LLM.Generate(c.Request.Context(), input)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
