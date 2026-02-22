@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/yourusername/secondbrain/internal/llm"
+	"github.com/yourusername/secondbrain/internal/memory"
 )
 
 // Mock LLM client
@@ -183,5 +185,197 @@ func TestHandleChatCompletions_Unit(t *testing.T) {
 				t.Errorf("content = %q, want %q", resp.Choices[0].Message.Content, tt.wantContent)
 			}
 		})
+	}
+}
+
+// mockKB is a knowledge base that returns a configurable error for tests.
+type mockKB struct {
+	searchErr error
+}
+
+func (m *mockKB) Search(ctx context.Context, query string, limit int) ([]memory.DocumentHit, error) {
+	if m.searchErr != nil {
+		return nil, m.searchErr
+	}
+	return []memory.DocumentHit{}, nil
+}
+
+func (m *mockKB) Upsert(ctx context.Context, notionPageID string, text string) error {
+	return nil
+}
+
+func TestHandleChatCompletions_SearchKnowledgeBaseError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	kbErr := errors.New("search failed")
+	callCount := 0
+	llmMock := &mockLLM{
+		generateFunc: func(ctx context.Context, in llm.GenerateInput) (*llm.GenerateOutput, error) {
+			callCount++
+			if callCount == 1 {
+				return &llm.GenerateOutput{
+					Content: "",
+					ToolCalls: []llm.ToolCall{
+						{ID: "1", Name: "SearchKnowledgeBase", Args: map[string]any{"query": "test"}},
+					},
+					FinishReason: "stop",
+				}, nil
+			}
+			return &llm.GenerateOutput{Content: "Search failed.", FinishReason: "stop"}, nil
+		},
+	}
+	chat := &ChatHandler{
+		LLM:     llmMock,
+		Working: &mockWorking{},
+		KB:      &mockKB{searchErr: kbErr},
+	}
+	r := Router(chat)
+	body := ChatCompletionRequest{
+		Model:    "default",
+		Messages: []ChatMessage{{Role: "user", Content: "Search for X"}},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var resp ChatCompletionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// Second turn: model received tool result "error: search failed" and replied
+	if resp.Choices[0].Message.Content == "" {
+		t.Error("expected non-empty assistant content after tool error")
+	}
+}
+
+func TestHandleChatCompletions_UnknownTool(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	calls := 0
+	llmMock := &mockLLM{
+		generateFunc: func(ctx context.Context, in llm.GenerateInput) (*llm.GenerateOutput, error) {
+			calls++
+			if calls == 1 {
+				return &llm.GenerateOutput{
+					Content: "",
+					ToolCalls: []llm.ToolCall{
+						{ID: "1", Name: "NonExistentTool", Args: map[string]any{}},
+					},
+					FinishReason: "stop",
+				}, nil
+			}
+			return &llm.GenerateOutput{Content: "I don't have that tool.", FinishReason: "stop"}, nil
+		},
+	}
+	chat := &ChatHandler{
+		LLM:     llmMock,
+		Working: &mockWorking{},
+	}
+	r := Router(chat)
+	body := ChatCompletionRequest{
+		Model:    "default",
+		Messages: []ChatMessage{{Role: "user", Content: "Hi"}},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var resp ChatCompletionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Choices[0].Message.Content == "" {
+		t.Error("expected non-empty reply after unknown tool result")
+	}
+}
+
+func TestHandleChatCompletions_UpsertUserFactEmptyFact(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	calls := 0
+	llmMock := &mockLLM{
+		generateFunc: func(ctx context.Context, in llm.GenerateInput) (*llm.GenerateOutput, error) {
+			calls++
+			if calls == 1 {
+				return &llm.GenerateOutput{
+					Content: "",
+					ToolCalls: []llm.ToolCall{
+						{ID: "1", Name: "UpsertUserFact", Args: map[string]any{"fact": ""}},
+					},
+					FinishReason: "stop",
+				}, nil
+			}
+			return &llm.GenerateOutput{Content: "I need a fact to save.", FinishReason: "stop"}, nil
+		},
+	}
+	chat := &ChatHandler{
+		LLM:     llmMock,
+		Working: &mockWorking{},
+		Facts:   &mockFacts{},
+	}
+	r := Router(chat)
+	body := ChatCompletionRequest{
+		Model:    "default",
+		Messages: []ChatMessage{{Role: "user", Content: "Remember this"}},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var resp ChatCompletionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Choices[0].Message.Content == "" {
+		t.Error("expected non-empty reply after empty fact tool result")
+	}
+}
+
+// mockFacts implements memory.UserFactStore for tests.
+type mockFacts struct{}
+
+func (m *mockFacts) GetProfile(ctx context.Context, userID string) (string, error) {
+	return "", nil
+}
+
+func (m *mockFacts) AppendFact(ctx context.Context, userID string, fact string) error {
+	return nil
+}
+
+func TestOpenAIMessagesToLLM(t *testing.T) {
+	h := &ChatHandler{}
+	msgs := h.openAIMessagesToLLM([]ChatMessage{
+		{Role: "system", Content: "You are helpful."},
+		{Role: "user", Content: "Hi"},
+		{Role: "assistant", Content: "Hello!"},
+	})
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages (system skipped), got %d", len(msgs))
+	}
+	if msgs[0].Role != "user" || msgs[0].Content != "Hi" {
+		t.Errorf("first message = %+v", msgs[0])
+	}
+	if msgs[1].Role != "model" || msgs[1].Content != "Hello!" {
+		t.Errorf("assistant should become model role: %+v", msgs[1])
+	}
+}
+
+func TestRouter_Health(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := Router(&ChatHandler{})
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /health status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }

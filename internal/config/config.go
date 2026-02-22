@@ -45,13 +45,25 @@ func DefaultMaxTokens() int {
 }
 
 // DefaultTemperature returns default temperature when request omits it. Uses GEMINI_TEMPERATURE if set, else 0.7.
+// Clamped to [0, 2] to match Gemini API valid range.
 func DefaultTemperature() float32 {
+	var t float32
 	if v := os.Getenv("GEMINI_TEMPERATURE"); v != "" {
 		if f, err := strconv.ParseFloat(v, 32); err == nil {
-			return float32(f)
+			t = float32(f)
+		} else {
+			t = floatEnv("CHAT_DEFAULT_TEMPERATURE", DefaultTemperatureVal)
 		}
+	} else {
+		t = floatEnv("CHAT_DEFAULT_TEMPERATURE", DefaultTemperatureVal)
 	}
-	return floatEnv("CHAT_DEFAULT_TEMPERATURE", DefaultTemperatureVal)
+	if t < 0 {
+		return 0
+	}
+	if t > 2 {
+		return 2
+	}
+	return t
 }
 
 // KBMaxTextChars returns KB_MAX_TEXT_CHARS (truncate fetched Notion text). Default 6000 (~1500 tokens).

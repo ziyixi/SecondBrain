@@ -1,6 +1,8 @@
 package api
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -9,7 +11,7 @@ func Router(chat *ChatHandler) *gin.Engine {
 	r := gin.Default()
 	r.POST("/v1/chat/completions", chat.HandleChatCompletions)
 	r.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	return r
 }

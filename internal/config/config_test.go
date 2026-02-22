@@ -60,3 +60,27 @@ func TestEnvOverride(t *testing.T) {
 		t.Errorf("WorkingMemorySize() = %v, want 50", v)
 	}
 }
+
+func TestDefaultTemperature_Clamping(t *testing.T) {
+	os.Unsetenv("CHAT_DEFAULT_TEMPERATURE")
+	defer os.Unsetenv("GEMINI_TEMPERATURE")
+
+	os.Setenv("GEMINI_TEMPERATURE", "3")
+	if v := DefaultTemperature(); v != 2 {
+		t.Errorf("GEMINI_TEMPERATURE=3 should clamp to 2, got %v", v)
+	}
+
+	os.Setenv("GEMINI_TEMPERATURE", "-0.5")
+	if v := DefaultTemperature(); v != 0 {
+		t.Errorf("GEMINI_TEMPERATURE=-0.5 should clamp to 0, got %v", v)
+	}
+}
+
+func TestEnvOverride_InvalidValues(t *testing.T) {
+	os.Setenv("WORKING_MEMORY_SIZE", "invalid")
+	defer os.Unsetenv("WORKING_MEMORY_SIZE")
+
+	if v := WorkingMemorySize(); v != DefaultWorkingMemorySize {
+		t.Errorf("invalid WORKING_MEMORY_SIZE should use default %d, got %d", DefaultWorkingMemorySize, v)
+	}
+}

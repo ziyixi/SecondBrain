@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -40,7 +42,9 @@ func NewQdrantKnowledgeBase(embedder func(ctx context.Context, text string) ([]f
 	}
 	port := 6334
 	if p := os.Getenv("QDRANT_PORT"); p != "" {
-		fmt.Sscanf(p, "%d", &port)
+		if n, err := strconv.Atoi(p); err == nil && n > 0 {
+			port = n
+		}
 	}
 	collection := os.Getenv("QDRANT_COLLECTION")
 	if collection == "" {
@@ -241,13 +245,7 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 }
 
 func sortByScoreDesc(hits []DocumentHit) {
-	for i := 0; i < len(hits); i++ {
-		for j := i + 1; j < len(hits); j++ {
-			if hits[j].Score > hits[i].Score {
-				hits[i], hits[j] = hits[j], hits[i]
-			}
-		}
-	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].Score > hits[j].Score })
 }
 
 var tokenRe = regexp.MustCompile(`[a-zA-Z0-9]+`)

@@ -109,7 +109,6 @@ func (h *ChatHandler) HandleChatCompletions(c *gin.Context) {
 		for _, tc := range out.ToolCalls {
 			result := h.executeTool(c.Request.Context(), userID, tc)
 			if h.Working != nil {
-				h.Working.Append("assistant", out.Content)
 				h.Working.Append("user", "Tool "+tc.Name+" result: "+result)
 			}
 			input.Messages = append(input.Messages, llm.ChatMessage{Role: "user", Content: "Tool " + tc.Name + " result: " + result})
