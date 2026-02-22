@@ -226,13 +226,12 @@ func (q *QdrantKnowledgeBase) Search(ctx context.Context, query string, limit in
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	// Optional: re-rank by keyword over fetched text (hybrid)
 	if q.fetcher != nil && len(out) > 0 {
 		queryTokens := tokenizeLower(query)
-		for _, h := range out {
-			kwScore := keywordScore(queryTokens, h.Text)
+		for i := range out {
+			kwScore := keywordScore(queryTokens, out[i].Text)
 			rrfKw := 1.0 / (float64(rrfK) + 1.0/(kwScore+0.01))
-			h.Score += rrfKw
+			out[i].Score += rrfKw
 		}
 		sortByScoreDesc(out)
 	}
