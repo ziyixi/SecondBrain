@@ -52,23 +52,26 @@ func (c *GeminiClient) Generate(ctx context.Context, in GenerateInput) (*Generat
 	}
 	temp := &tempF
 
-	var parts []*genai.Part
-	if in.SystemPrompt != "" {
-		parts = append(parts, &genai.Part{Text: "System: " + in.SystemPrompt})
-	}
+	var contents []*genai.Content
 	for _, m := range in.Messages {
 		role := m.Role
 		if role == "assistant" {
 			role = "model"
 		}
-		parts = append(parts, &genai.Part{Text: role + ": " + m.Content})
+		contents = append(contents, &genai.Content{
+			Role:  role,
+			Parts: []*genai.Part{{Text: m.Content}},
+		})
 	}
-
-	contents := []*genai.Content{{Parts: parts}}
 
 	config := &genai.GenerateContentConfig{
 		MaxOutputTokens: int32(maxTok),
 		Temperature:     temp,
+	}
+	if in.SystemPrompt != "" {
+		config.SystemInstruction = &genai.Content{
+			Parts: []*genai.Part{{Text: in.SystemPrompt}},
+		}
 	}
 
 	if len(in.Tools) > 0 {
