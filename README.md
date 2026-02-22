@@ -136,16 +136,21 @@ Optional header: `X-User-ID: <id>` to scope user facts to a profile.
 
 ## Setting up Notion
 
-Notion is used in two ways: a **user profile page** (for UpsertUserFact) and a **knowledge database** (for MemorizeInformation and knowledge search). Both require a Notion integration and the right IDs.
+Notion is used in two ways: a **user profile page** (for UpsertUserFact) and a **knowledge database** (for MemorizeInformation and knowledge search). Both require a Notion **internal integration** and the right IDs. This app uses **internal integration** auth (one token per workspace); for OAuth / public integrations, see [Notion’s Authorization guide](https://developers.notion.com/docs/authorization).
 
-### 1. Create a Notion integration and get the token
+### 1. Create an internal integration and get the token
 
-1. Go to [Notion Integrations](https://www.notion.so/my-integrations) and click **New integration**.
-2. Name it (e.g. "Second Brain"), pick the workspace, and create.
-3. Open the integration's **Settings** and copy the **Internal Integration Secret**. This is your `NOTION_TOKEN`.
-4. Put it in `.env`: `NOTION_TOKEN=secret_...`
+Follow the [Notion Authorization guide (internal integration)](https://developers.notion.com/docs/authorization#internal-integration-auth-flow-set-up):
 
-Every page and database you want the app to use must be **shared with this integration**: open the page or database → **Share** (top right) → **Invite** → select your integration.
+1. In the [integrations dashboard](https://www.notion.so/my-integrations), click **New integration** and create an **Internal** integration (tied to one workspace).
+2. Open the **Configuration** tab and copy the **integration token**. This is your `NOTION_TOKEN`. Keep it secret (e.g. in `.env`, never in source control).
+3. Put it in `.env`: `NOTION_TOKEN=secret_...`
+
+**Grant access to pages and databases:** The integration can only access content you explicitly share with it. For each page or database:
+
+- Open the page or database in Notion → click the **•••** menu (top right) → **Add connections** → search for your integration and select it.
+
+You can also use **Share** → **Invite** and select the integration. See [Add & manage integrations](https://www.notion.com/help/add-and-manage-connections-with-the-api) in Notion Help.
 
 ### 2. User profile page (for UpsertUserFact)
 
@@ -154,7 +159,7 @@ The app reads and appends **block content** (paragraphs, lists, etc.) on a singl
 **What you need:**
 
 - **One Notion page** — e.g. "My profile" or "User facts". It can be empty or contain existing text. The app will append new facts as paragraph blocks.
-- **Share that page** with your integration (Share → Invite → your integration).
+- **Share that page** with your integration (••• → **Add connections** → your integration, or Share → Invite).
 
 **How to get the page ID:**
 
@@ -178,7 +183,7 @@ The **MemorizeInformation** tool creates and updates pages inside a Notion **dat
 - **A Notion database** (full-page or inline). The app will create new pages in it and append to existing ones.
 - **One Title property** — Notion databases always have a "Name" (title) column. The app uses it as the page title (e.g. the "topic" in MemorizeInformation). If your title column is not named **Name**, set:
   - `NOTION_KNOWLEDGE_TITLE_PROPERTY=<your-title-property-name>`
-- **Share the database** with your integration (open the database as a full page → Share → Invite → your integration).
+- **Share the database** with your integration (open the database as a full page → ••• → **Add connections** → your integration).
 
 **How to get the database ID:**
 

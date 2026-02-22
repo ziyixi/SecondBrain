@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-
-	"github.com/jomei/notionapi"
 )
 
 const (
@@ -14,10 +12,11 @@ const (
 )
 
 // NotionKnowledgeStore creates and appends to pages in a Notion database (knowledge graph).
-// NOTION_TOKEN, NOTION_KNOWLEDGE_DATABASE_ID required. NOTION_KNOWLEDGE_TITLE_PROPERTY (default "Name") optional.
+// Auth: internal integration token (NOTION_TOKEN); see https://developers.notion.com/docs/authorization.
+// NOTION_KNOWLEDGE_DATABASE_ID required; database must be shared with the integration. NOTION_KNOWLEDGE_TITLE_PROPERTY (default "Name") optional.
 type NotionKnowledgeStore struct {
-	client     *notionapi.Client
-	databaseID notionapi.DatabaseID
+	client     *notionClient
+	databaseID string
 	titleProp  string
 }
 
@@ -36,8 +35,8 @@ func NewNotionKnowledgeStore() (*NotionKnowledgeStore, error) {
 		titleProp = defaultKnowledgeTitleProperty
 	}
 	return &NotionKnowledgeStore{
-		client:     notionapi.NewClient(notionapi.Token(token)),
-		databaseID: notionapi.DatabaseID(strings.TrimSpace(dbID)),
+		client:     newNotionClient(token),
+		databaseID: strings.TrimSpace(dbID),
 		titleProp:  titleProp,
 	}, nil
 }
@@ -45,47 +44,10 @@ func NewNotionKnowledgeStore() (*NotionKnowledgeStore, error) {
 // CreatePage creates a new page in the knowledge database with the given title and content (one paragraph block).
 // Returns the new page's ID.
 func (n *NotionKnowledgeStore) CreatePage(ctx context.Context, title string, content string) (string, error) {
-	req := &notionapi.PageCreateRequest{
-		Parent: notionapi.Parent{
-			Type:       notionapi.ParentTypeDatabaseID,
-			DatabaseID: n.databaseID,
-		},
-		Properties: notionapi.Properties{
-			n.titleProp: notionapi.TitleProperty{
-				Title: []notionapi.RichText{
-					{Type: "text", Text: &notionapi.Text{Content: title}}},
-			},
-		},
-	}
-	if content != "" {
-		req.Children = []notionapi.Block{
-			&notionapi.ParagraphBlock{
-				BasicBlock: notionapi.BasicBlock{Object: "block", Type: notionapi.BlockTypeParagraph},
-				Paragraph: notionapi.Paragraph{
-					RichText: []notionapi.RichText{{Type: "text", Text: &notionapi.Text{Content: content}}},
-				},
-			},
-		}
-	}
-	page, err := n.client.Page.Create(ctx, req)
-	if err != nil {
-		return "", err
-	}
-	return string(page.ID), nil
+	return n.client.CreatePage(ctx, n.databaseID, n.titleProp, title, content)
 }
 
 // AppendToPage appends a paragraph block with content to an existing page.
 func (n *NotionKnowledgeStore) AppendToPage(ctx context.Context, pageID string, content string) error {
-	blockID := notionapi.BlockID(pageID)
-	_, err := n.client.Block.AppendChildren(ctx, blockID, &notionapi.AppendBlockChildrenRequest{
-		Children: []notionapi.Block{
-			&notionapi.ParagraphBlock{
-				BasicBlock: notionapi.BasicBlock{Object: "block", Type: notionapi.BlockTypeParagraph},
-				Paragraph: notionapi.Paragraph{
-					RichText: []notionapi.RichText{{Type: "text", Text: &notionapi.Text{Content: content}}},
-				},
-			},
-		},
-	})
-	return err
+	return n.client.AppendBlockChildren(ctx, pageID, []string{content})
 }

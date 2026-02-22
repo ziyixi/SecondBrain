@@ -30,9 +30,9 @@ This document covers layout, configuration, build, run, testing, and CI. For **w
 | `GEMINI_EMBEDDING_MODEL` | Embedding model (default `text-embedding-004`). |
 | `GEMINI_MAX_OUTPUT_TOKENS` | Max tokens (default 2048). |
 | `GEMINI_TEMPERATURE` | Temperature (0–2). |
-| `NOTION_TOKEN` | Notion API token (optional). From [Notion Integrations](https://www.notion.so/my-integrations) → Internal Integration Secret. |
-| `NOTION_USER_PROFILE_PAGE_ID` | Notion **page** ID for user profile/facts (optional). See [README: Setting up Notion](README.md#setting-up-notion) for how to get page ID from URL. |
-| `NOTION_KNOWLEDGE_DATABASE_ID` | Notion **database** ID for knowledge pages (required for MemorizeInformation). Database must have a Title property (default name `Name`). See README for setup. |
+| `NOTION_TOKEN` | Notion **internal integration** token (optional). Create in [integrations dashboard](https://www.notion.so/my-integrations) → Configuration tab. See [Notion Authorization](https://developers.notion.com/docs/authorization#internal-integration-auth-flow-set-up). |
+| `NOTION_USER_PROFILE_PAGE_ID` | Notion **page** ID for user profile/facts (optional). Share the page with the integration (Add connections). See [README: Setting up Notion](README.md#setting-up-notion). |
+| `NOTION_KNOWLEDGE_DATABASE_ID` | Notion **database** ID for knowledge pages (required for MemorizeInformation). Database must have a Title property (default `Name`). Share the database with the integration. |
 | `NOTION_KNOWLEDGE_TITLE_PROPERTY` | Title property name in that database (default `Name`). |
 | `QDRANT_HOST`, `QDRANT_PORT` | Qdrant host/port (optional). |
 | `QDRANT_COLLECTION` | Collection name (default `knowledge`). |
